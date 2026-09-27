@@ -41,7 +41,7 @@ def progress_candidates(group):
   current=facts(item);added=current-known;known|=current
   if added and (item.get('publishedAt') or 0)>(group[0].get('publishedAt') or 0):
    key=hashlib.sha256('|'.join(sorted(added)).encode()).hexdigest()[:16]
-   out.append({'key':key,'publishedAt':item['publishedAt'],'url':item.get('url'),'source':item.get('source'),'signals':sorted(added),'reason':'后续报道出现新的金额、比例或状态表述；仅为规则识别候选，需核对原文'})
+   out.append({'key':key,'publishedAt':item['publishedAt'],'discoveredAt':item.get('discoveredAt'),'url':item.get('url'),'source':item.get('source'),'signals':sorted(added),'reason':'后续报道出现新的金额、比例或状态表述；仅为规则识别候选，需核对原文'})
  return out
 
 def cluster(rows):

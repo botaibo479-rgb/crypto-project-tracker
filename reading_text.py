@@ -31,6 +31,7 @@ BASE = r'https?://[^\s<>]+|@[A-Za-z0-9_]+|\$[A-Za-z][A-Za-z0-9]*\b|\b(?:SOON|NEA
 PROTECTED = re.compile(r'https?://[^\s<>]+|'+'(?i:'+EXTRA.pattern+')|'+BASE)
 
 def translation_version(text):
+    if re.search(r'\b(?:open interest|funding rate|token unlock|fully diluted valuation)\b',text,re.I):return 'v4:'
     return 'v3:' if readable(text) != text or EXTRA.search(text) or re.search(r'\$[A-Za-z]', text) else 'v2:'
 
 def chunks(text, limit=2200):
@@ -44,3 +45,9 @@ def chunks(text, limit=2200):
         yield text[:cut]
         text = text[cut:]
     if text: yield text
+
+
+TERMS = {'open interest':'持仓量（OI）','funding rate':'资金费率','token unlock':'代币解锁','fully diluted valuation':'完全稀释估值（FDV）'}
+def standard_terms(text):
+    """Normalize known technical phrases without modifying stored originals."""
+    return re.sub(r'\b(?:'+ '|'.join(re.escape(k) for k in TERMS)+r')\b',lambda m:TERMS[m.group().lower()],text,flags=re.I)

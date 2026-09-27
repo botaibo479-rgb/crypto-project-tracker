@@ -2,12 +2,16 @@
 import json,time,math,threading,uuid,hashlib
 from pathlib import Path
 
+CANDLE_PERIODS={'1h':3600000,'4h':14400000,'1d':86400000}
 TYPES={'news','price','oi','ema','level','combo'}
 def validate(payload,projects):
  p=str(payload.get('p',''));kind=payload.get('type');name=str(payload.get('name','')).strip()
  if p not in projects or kind not in TYPES or not 1<=len(name)<=60:raise ValueError('项目、类型或规则名称无效')
  period=payload.get('period');expected='24h' if kind=='price' else '1h' if kind=='oi' else '4h'
- if kind!='news' and period!=expected:raise ValueError('当前该规则支持的周期为 '+expected)
+ if kind in {'ema','level','combo'}:
+  if period not in CANDLE_PERIODS:raise ValueError('请选择 1 小时、4 小时或日线')
+  expected=period
+ elif kind!='news' and period!=expected:raise ValueError('当前该规则支持的周期为 '+expected)
  threshold=float(payload.get('threshold',5))
  if not math.isfinite(threshold) or not 0<threshold<=10000000:raise ValueError('阈值须为有效正数')
  cooldown=int(payload.get('cooldownMinutes',60))
@@ -25,7 +29,7 @@ def evaluate(rule,runtime,market,news,now):
   seen.append(key);runtime['seen']=seen[-1000:]
   if now-runtime.get('lastFiredAt',0)<rule['cooldownMinutes']*60000:return
   runtime['lastFiredAt']=now
-  fired.append({'id':uuid.uuid4().hex,'ruleId':rule['id'],'ruleName':rule['name'],'p':rule['p'],'type':rule['type'],'title':title,'at':now,'evidence':evidence})
+  fired.append({'id':uuid.uuid4().hex,'ruleId':rule['id'],'ruleName':rule['name'],'p':rule['p'],'type':rule['type'],'title':title,'at':now,'evidence':evidence,'ruleSnapshot':{k:rule.get(k) for k in ['type','period','threshold','cooldownMinutes','confirm']}})
  kind=rule['type'];runtime['checkedAt']=now
  if kind=='news':
   runtime['status']='watching'
@@ -34,13 +38,15 @@ def evaluate(rule,runtime,market,news,now):
    date=e.get('publishedAt')
    if date and rule['createdAt']<date<=now and now-date<=86400000:
     key='news:'+e['id']
-    emit(key,e.get('titleZh') or e['title'],{'url':e.get('url'),'publishedAt':date,'reason':e.get('priorityReason'),'note':'文本规则命中的重点候选，未经独立核实'})
+    emit(key,e.get('titleZh') or e['title'],{'eventId':e['id'],'source':e.get('source'),'url':e.get('url'),'publishedAt':date,'reason':e.get('priorityReason'),'note':'文本规则命中的重点候选，未经独立核实'})
    for update in e.get('progressCandidates',[]):
     date=update.get('publishedAt')
     if date and rule['createdAt']<date<=now and now-date<=86400000:
-     emit('progress:'+e['p']+':'+update['key']+':'+str(e.get('id')),'项目事件出现后续进展候选',{'url':update.get('url'),'publishedAt':date,'reason':update['reason'],'note':'新增表述：'+', '.join(update['signals'])})
+     emit('progress:'+e['p']+':'+update['key']+':'+str(e.get('id')),'项目事件出现后续进展候选',{'eventId':e['id'],'source':update.get('source'),'url':update.get('url'),'publishedAt':date,'reason':update['reason'],'note':'新增表述：'+', '.join(update['signals'])})
   return fired
  if not market:runtime['status']='missing_data';return []
+ if kind in {'ema','level','combo'} and market.get('period',rule['period'])!=rule['period']:
+  runtime['status']='missing_data';return []
  value=None;sample=None;condition=False;evidence={}
  if kind in ['price','oi']:
   field='change24h' if kind=='price' else 'oiChange1h';stamp='priceAt' if kind=='price' else 'oiAt'
@@ -58,7 +64,9 @@ def evaluate(rule,runtime,market,news,now):
      oi=market.get('oiChange1h');oi_at=market.get('oiAt')
      if oi is None or not oi_at or not 0<=now-oi_at<=10*60000:value=None
      condition=condition and oi is not None and oi>=rule['threshold'];evidence['oiChange1h']=oi
- max_age=10*60000 if kind in ['price','oi'] else 4*3600000+15*60000
+ evidence.update(source=market.get('source','Binance USD-M'),symbol=market.get('symbol'),period=rule['period'])
+ if kind=='combo':evidence.update(threshold=rule['threshold'],oiAt=market.get('oiAt'))
+ max_age=10*60000 if kind in ['price','oi'] else CANDLE_PERIODS.get(rule['period'],14400000)+15*60000
  if value is None or sample is None or not 0<=now-sample<=max_age:runtime['status']='missing_data';return []
  runtime['status']='watching'
  if kind in ['price','oi']:
@@ -69,9 +77,22 @@ def evaluate(rule,runtime,market,news,now):
  else:
   if sample<=rule['createdAt']:return []
   if not condition:return []
- labels={'price':'24h 价格变化达到阈值','oi':'1h OI 变化达到阈值','level':'4h 收盘上穿关键价位','ema':'4h 收盘上穿双均线','combo':'4h 双均线突破且 OI 增长达标'}
+ period_label={'1h':'1 小时','4h':'4 小时','1d':'日线'}.get(rule['period'],'4 小时')
+ labels={'price':'24h 价格变化达到阈值','oi':'1h OI 变化达到阈值','level':period_label+'收盘上穿关键价位','ema':period_label+'收盘上穿双均线','combo':period_label+'双均线突破且 OI 增长达标'}
  emit(kind+':'+str(sample),labels[kind],evidence)
  return fired
+
+def chart_market(base,snapshot):
+ """Adapt only the selected closed-candle snapshot; never reuse another timeframe."""
+ result={k:v for k,v in (base or {}).items() if k in ['symbol','source','oiChange1h','oiAt']}
+ rows=snapshot.get('candles',[])
+ if len(rows)<2:return result
+ prev,last=rows[-2:]
+ result.update(candles=rows,close4h=last['close'],candleAt=last['closeTime'],period=snapshot['period'])
+ if all(r.get(k) is not None for r in [prev,last] for k in ['ema200','ema360']):
+  cross=prev['close']<=max(prev['ema200'],prev['ema360']) and last['close']>max(last['ema200'],last['ema360'])
+  result.update(ema200=last['ema200'],ema360=last['ema360'],cross='up' if cross else None)
+ return result
 
 class Store:
  def __init__(self,path):
@@ -100,6 +121,6 @@ class Store:
  def tick(self,markets,news,now):
   with self.lock:
    for r in self.data['rules']:
-    events=evaluate(r,self.data['runtime'].setdefault(r['id'],{}),markets.get(r['p']),news,now)
+    events=evaluate(r,self.data['runtime'].setdefault(r['id'],{}),(markets.get((r['p'],r['period'])) if r['type'] in {'ema','level','combo'} and r['period']!='4h' else markets.get(r['p'])),news,now)
     self.data['alerts'].extend(events)
    self.data['alerts']=self.data['alerts'][-500:];self.save()

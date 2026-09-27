@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 ROOT=Path(__file__).resolve().parent
 TLOCK=threading.Lock(); TRANSLATIONS={}; RETRY={}
 TRANSLATION_PAUSE_UNTIL=0
+TRANSLATION_ERRORS={}; TRANSLATION_ATTEMPTS={}
 TPATH=DATA_DIR/'translations.json'
 APATH=DATA_DIR/'avatars.json'
 try:AVATARS=json.loads(APATH.read_text())
@@ -48,6 +49,7 @@ def translate_one(text,request):
   def protect(match):
    protected.append(match.group());return 'ZXQKEEP'+str(len(protected)-1)+'QXZ'
   source=reading_text.PROTECTED.sub(protect,reading_text.readable(text))
+  source=reading_text.standard_terms(source)
   for chunk in reading_text.chunks(source):
    query=urllib.parse.urlencode({'client':'gtx','sl':'auto','tl':'zh-CN','dt':'t','q':chunk})
    result=json.loads(request('https://translate.googleapis.com/translate_a/single?'+query))
@@ -56,10 +58,13 @@ def translate_one(text,request):
   for i,original in enumerate(protected):value=re.sub(r'ZXQ\s*(?:KEEP|保留)\s*'+str(i)+r'\s*QXZ',lambda _:original,value,flags=re.I)
   if 'ZXQ' in value:raise ValueError('unresolved_placeholder')
   if not value:raise ValueError('empty_translation')
-  with TLOCK:TRANSLATIONS[key]=value
+  with TLOCK:
+   TRANSLATIONS[key]=value;RETRY.pop(key,None);TRANSLATION_ERRORS.pop(key,None);TRANSLATION_ATTEMPTS.pop(key,None)
  except Exception as error:
   with TLOCK:
-   RETRY[key]=time.time()+300
+   TRANSLATION_ATTEMPTS[key]=TRANSLATION_ATTEMPTS.get(key,0)+1
+   RETRY[key]=time.time()+min(3600,300*2**min(TRANSLATION_ATTEMPTS[key]-1,4))
+   TRANSLATION_ERRORS[key]='rate_limited' if getattr(error,'code',None)==429 else 'failed'
    if getattr(error,'code',None)==429:
     try:delay=max(300,min(3600,int(error.headers.get('Retry-After','900'))))
     except (ValueError,TypeError,AttributeError):delay=900
@@ -69,6 +74,14 @@ def translation_status():
  with TLOCK:
   paused=TRANSLATION_PAUSE_UNTIL>time.time()
   return {'status':'rate_limited' if paused else 'available','retryAt':int(TRANSLATION_PAUSE_UNTIL*1000) if paused else None}
+
+def text_translation_status(text):
+ if translated(text) is not None:return {'status':'ready','retryAt':None}
+ key=digest(text)
+ with TLOCK:
+  retry=max(RETRY.get(key,0),TRANSLATION_PAUSE_UNTIL)
+  status='rate_limited' if TRANSLATION_PAUSE_UNTIL>time.time() else TRANSLATION_ERRORS.get(key,'pending')
+  return {'status':status,'retryAt':int(retry*1000) if retry>time.time() else None,'attempts':TRANSLATION_ATTEMPTS.get(key,0)}
 
 def translation_loop(data,lock,request):
  while True:
@@ -87,6 +100,7 @@ def translation_loop(data,lock,request):
 def localize(e):
  e=dict(e)
  if e.get('relatedItems'):e['relatedItems']=[localize(item) for item in e['relatedItems']]
+ e['translationDetails']={field:text_translation_status(e.get(field,'')) for field in ['title','summary']}
  e['titleZh']=translated(e.get('title',''));e['summaryZh']=translated(e.get('summary',''));e['translationStatus']='ready' if e['titleZh'] is not None and e['summaryZh'] is not None else 'pending';return e
 
 def search_projects(query,request):

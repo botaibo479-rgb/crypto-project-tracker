@@ -299,6 +299,10 @@ def alert_loop():
   try:
    with LOCK:
     markets=dict(DATA['markets']);news=cluster(curate(list(DATA['events']),projects=PROJECTS))
+   pairs={(r['p'],r['period']) for r in ALERT_STORE.snapshot()['rules'] if r['on'] and r['type'] in {'ema','level','combo'} and r['period']!='4h'}
+   for pid,period in pairs:
+    try:markets[(pid,period)]=alerts.chart_market(markets.get(pid),chart_data(pid,period))
+    except Exception:markets[(pid,period)]={}
    ALERT_STORE.tick(markets,news,now())
   except Exception as e:
    print('Alert evaluation failed: '+type(e).__name__,flush=True)
@@ -391,7 +395,7 @@ class Handler(SimpleHTTPRequestHandler):
   if self.path=='/api/live':
    with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in cluster(curate(DATA['events'],projects=PROJECTS))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
-  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js']:
+  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js']:
    self.send_error(404);return
   super().do_GET()
  def json_response(self,value,status=200):
