@@ -28,7 +28,13 @@ Windows 可用 `py -3 --version` 检查 Python。下文的 `python3` 在 Windows
 
 找到 Connect 或登录入口。本文核对页面时，登录弹窗显示 Google 登录和钱包入口，下方还有 Sign Up。没有账号先按页面提示注册，已有账号直接登录。选择自己常用的方式，验证与授权由本人完成。
 
-登录后打开 [MCP 页面](https://app.newsliquid.com/mcp)，查找 API Token 的获取或管理入口。登录后的按钮名称、额度与权限可能调整，以你当前账号页面为准。本文没有替读者新建账号，也不承诺注册后必然有免费额度或全部接口权限。
+登录后打开 [MCP 页面](https://app.newsliquid.com/mcp)，查找 API Token 的获取或管理入口。
+
+第一次跟着教程搭建，建议先购买最低价的付费会员 **Plus，1.90 USDT／月（约 1.9 U）**，用少量项目测试新闻查询、推特数据和本地阅读流程。觉得好用，再根据额度与功能需求考虑升级 **Pro** 或 **Max**。目前官方列出的月付价格分别为 Pro 29 USDT、Max 99 USDT。
+
+Plus 包含基础 API、推特和新闻数据查询，适合先做小范围测试。Pro 提供更高额度和更多功能，Max 还包含新闻与推特 WSS 实时推送。本教程的本地版使用定时查询，不需要为了跟着教程操作就直接购买 Max。实际消耗取决于关注项目、返回消息数和采集频率，不能保证最低套餐够持续运行整月。
+
+从 [NewsLiquid 注册入口](https://app.newsliquid.com?code=PC9PTKVS)登录后，在 MCP 页面选择升级计划，核对 Plus 套餐、订阅周期和金额，再由本人完成购买。价格和权益以结算页为准，详情见 [官方会员说明](https://docs.newsliquid.com/plans-and-points)。
 
 OpenTwitter 用于查询公开 X 资料、推文及搜索结果；OpenNews 用于检索新闻。两个 skills 当前使用同一个环境变量 `OPENNEWS_TOKEN`，认证请求发往 `https://ai.6551.io`。可对照 [OpenTwitter 官方 skill](https://github.com/6551Team/opentwitter-mcp/blob/main/openclaw-skill/opentwitter/SKILL.md)与 [OpenNews 官方仓库](https://github.com/6551Team/opennews-mcp)。
 

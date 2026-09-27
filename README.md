@@ -19,6 +19,8 @@ Windows 使用 `py -3` 替换 `python3`。打开 http://127.0.0.1:4317/ ，终�
 
 [NewsLiquid 注册入口（邀请码 PC9PTKVS）](https://app.newsliquid.com?code=PC9PTKVS) · [MCP 凭证页面](https://app.newsliquid.com/mcp)
 
+初次体验建议先购买最低价付费会员 **Plus，1.90 USDT／月（约 1.9 U）**，用少量项目测试；觉得好用，再按需求升级 **Pro** 或 **Max**。本地版采用定时查询，不要求 Max 的 WSS 权限。套餐能使用多久取决于实际消息消耗，价格与权益以结算页及 [官方会员说明](https://docs.newsliquid.com/plans-and-points) 为准。
+
 在支持的 AI 助手环境安装两个 skills，需要 Node.js/npx。
 
 ```bash
