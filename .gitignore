@@ -1,0 +1,12 @@
+data/
+__pycache__/
+*.pyc
+.env*
+!.env.example
+*.log
+.DS_Store
+.venv/
+.agents/
+.claude/
+.codex/
+.openai/
