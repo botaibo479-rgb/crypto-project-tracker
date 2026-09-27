@@ -4,13 +4,13 @@
 
 这篇教程把这些入口放进一个本地阅读器，项目叫 Signal。装好以后，在浏览器里打开它，就能按项目阅读资讯、查看团队账号和 K 线，再给自己关心的条件设置提醒。默认提供 SOON、NEAR、PHA、NIL 四个示例，也可以添加自己的关注项目。
 
-电脑需要联网，采集程序需要保持运行。没有云服务器也能用，不需要交易所交易密钥，不会下单。当前仍有翻译限流、公开资料不完整等限制，下面会讲清楚怎样判断它是否正常工作。
+当前以开源 Beta 提供，适合在自己的电脑上作为个人工具试用。电脑需要联网，采集程序需要保持运行。没有云服务器也能用，不需要交易所交易密钥，不会下单。当前仍有翻译限流、公开资料不完整等限制，下面会讲清楚怎样判断它是否正常工作。
 
 ## 一、准备运行环境
 
-准备 Python 3.12 或更高版本，以及 Node.js 的当前 LTS 版本。Python 运行阅读器，Node.js 提供安装 skills 所需的 npx。如果还希望让 AI 帮你查询项目，就准备一个支持 skills 的 AI 助手。只运行阅读器时，不需要 Node.js 或 AI 助手常驻。
+只运行阅读器，准备 Python 3.12 或更高版本即可，不需要安装 Node.js、skills 或 AI 助手。如果还希望通过 AI 助手查询项目，再安装 Node.js 的 LTS 版本，并准备一个支持 skills 的助手。后面的 skills 安装步骤可以按需跳过。
 
-从 [Python 官网](https://www.python.org/downloads/)和 [Node.js 官网](https://nodejs.org/en/download)安装后，重新打开终端检查。
+从 [Python 官网](https://www.python.org/downloads/)安装后，重新打开终端检查 Python 版本。下面两条 Node.js/npx 检查命令仅适用于需要安装 skills 的用户，安装入口为 [Node.js 官网](https://nodejs.org/en/download)。
 
 ```bash
 python3 --version
