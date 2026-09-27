@@ -53,12 +53,12 @@ skills 提供调用 API 的操作说明，数据仍需要联网获取。安装 s
 
 ## 四、下载阅读器代码
 
-打开 [GitHub 项目](https://github.com/sfeng49/crypto-project-tracker)，选择 Code，再选择 Download ZIP。解压后，用终端进入含有 `server.py`、`run.py` 和 `dist` 的那一层目录。进错目录是最常见的启动失败原因之一。
+打开 [GitHub 项目](https://github.com/jamesxxx-ai/crypto-project-tracker)，选择 Code，再选择 Download ZIP。解压后，用终端进入含有 `server.py`、`run.py` 和 `dist` 的那一层目录。进错目录是最常见的启动失败原因之一。
 
 熟悉 Git 的读者也可以运行下面的命令。
 
 ```bash
-git clone https://github.com/sfeng49/crypto-project-tracker.git
+git clone https://github.com/jamesxxx-ai/crypto-project-tracker.git
 cd crypto-project-tracker
 ```
 
