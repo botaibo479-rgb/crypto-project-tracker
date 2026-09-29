@@ -86,8 +86,8 @@ def text_translation_status(text):
 def translation_loop(data,lock,request):
  while True:
   with lock:
-   events=sorted(data['events'],key=lambda e:e.get('publishedAt') or 0,reverse=True)
-   texts=[e.get(field,'') for e in events for field in ['title','summary']]
+   events=sorted(data['events']+data.get('intelligenceEvents',[]),key=lambda e:e.get('publishedAt') or 0,reverse=True)
+   texts=[e.get(field,'') for e in events for field in ['title','summary']]+data.get('calendarTexts',[])
    for social in data.get('social',{}).values():
     texts.extend(a.get('text','') for a in social.get('discussants',[]))
   with TLOCK:retry=dict(RETRY)

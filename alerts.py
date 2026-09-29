@@ -3,17 +3,18 @@ import json,time,math,threading,uuid,hashlib
 from pathlib import Path
 
 CANDLE_PERIODS={'1h':3600000,'4h':14400000,'1d':86400000}
-TYPES={'news','price','oi','ema','level','combo'}
+PROVIDER_TYPES={'listing','funding','liquidation','flow'}
+TYPES=PROVIDER_TYPES|{'news','price','oi','ema','level','combo'}
 def validate(payload,projects):
  p=str(payload.get('p',''));kind=payload.get('type');name=str(payload.get('name','')).strip()
  if p not in projects or kind not in TYPES or not 1<=len(name)<=60:raise ValueError('项目、类型或规则名称无效')
- period=payload.get('period');expected='24h' if kind=='price' else '1h' if kind=='oi' else '4h'
+ period=payload.get('period');expected='event' if kind in PROVIDER_TYPES else '24h' if kind=='price' else '1h' if kind=='oi' else '4h'
  if kind in {'ema','level','combo'}:
   if period not in CANDLE_PERIODS:raise ValueError('请选择 1 小时、4 小时或日线')
   expected=period
  elif kind!='news' and period!=expected:raise ValueError('当前该规则支持的周期为 '+expected)
  threshold=float(payload.get('threshold',5))
- if not math.isfinite(threshold) or not 0<threshold<=10000000:raise ValueError('阈值须为有效正数')
+ if not math.isfinite(threshold) or not (0 if kind in PROVIDER_TYPES else .0000001)<=threshold<=1000000000:raise ValueError('阈值须为有效正数')
  cooldown=int(payload.get('cooldownMinutes',60))
  if not 1<=cooldown<=1440:raise ValueError('冷却时间须为 1–1440 分钟')
  if payload.get('confirm','close')!='close':raise ValueError('当前采用收盘确认，不支持盘中突破预警')
@@ -31,6 +32,15 @@ def evaluate(rule,runtime,market,news,now):
   runtime['lastFiredAt']=now
   fired.append({'id':uuid.uuid4().hex,'ruleId':rule['id'],'ruleName':rule['name'],'p':rule['p'],'type':rule['type'],'title':title,'at':now,'evidence':evidence,'ruleSnapshot':{k:rule.get(k) for k in ['type','period','threshold','cooldownMinutes','confirm']}})
  kind=rule['type'];runtime['checkedAt']=now
+ if kind in PROVIDER_TYPES:
+  runtime['status']='watching'
+  for e in sorted(news,key=lambda x:x.get('publishedAt') or 0):
+   date=e.get('publishedAt')
+   if e.get('p')!=rule['p'] or e.get('providerKind')!=kind or not date or not rule['createdAt']<date<=now or now-date>3600000:continue
+   if kind=='listing' and e.get('listingType')=='其他公告':continue
+   if kind=='liquidation' and rule['threshold']>0 and (e.get('amountUsd') is None or e['amountUsd']<rule['threshold']):continue
+   emit('provider:'+e['id'],e.get('titleZh') or e['title'],{'eventId':e['id'],'source':e.get('source'),'url':e.get('url'),'publishedAt':date,'amountUsd':e.get('amountUsd'),'threshold':rule['threshold'] if kind=='liquidation' else None,'reason':'OpenNews 分类事件命中；仅覆盖已采集样本','note':'数值未可靠提取时不触发金额门槛提醒'})
+  return fired
  if kind=='news':
   runtime['status']='watching'
   for e in sorted(news,key=lambda x:x.get('publishedAt') or 0):

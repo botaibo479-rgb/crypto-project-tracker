@@ -47,8 +47,8 @@ if(typeof document!=='undefined'){
   if(state.view==='rules'){
    const rows=liveData?.alertState?.alerts||[];
    document.querySelectorAll('.alert-history details').forEach((node,i)=>{const a=rows[rows.length-1-i];if(!a)return;
-    const para=node.querySelector('p');if(para&&a.type==='news'&&!a.titleZh)para.textContent=a.title+'（原文）';
-    node.insertAdjacentHTML('beforeend',`<p class="module-note">触发于 ${formatTime(a.at)} · ${escapeHtml(a.evidence?.source||(a.type==='news'?'来源见原文':'历史记录未保存来源'))}${a.ruleSnapshot?' · 当时规则：'+escapeHtml(ruleDescription({...a.ruleSnapshot,type:a.type})):''}</p><button class="secondary" data-alert-context="${escapeHtml(a.id)}">${a.type==='news'?'查看事件与原文':'查看项目 K 线'}</button>`);
+    const para=node.querySelector('p');if(para&&['news','listing','funding','liquidation','flow'].includes(a.type)&&!a.titleZh)para.textContent=a.title+'（原文）';
+    node.insertAdjacentHTML('beforeend',`<p class="module-note">触发于 ${formatTime(a.at)} · ${escapeHtml(a.evidence?.source||(['news','listing','funding','liquidation','flow'].includes(a.type)?'来源见原文':'历史记录未保存来源'))}${a.ruleSnapshot?' · 当时规则：'+escapeHtml(ruleDescription({...a.ruleSnapshot,type:a.type})):''}</p><button class="secondary" data-alert-context="${escapeHtml(a.id)}">${['news','listing','funding','liquidation','flow'].includes(a.type)?'查看事件与原文':'查看项目 K 线'}</button>`);
    });
   }
   if(alertContext&&state.project===alertContext.p){
@@ -59,7 +59,7 @@ if(typeof document!=='undefined'){
   if(b.hasAttribute('data-catchup-toggle')){catchupOnly=!catchupOnly;render()}
   if(b.hasAttribute('data-catchup-read')){for(const item of freshItems()){if(!state.read.includes(item.id))state.read.push(item.id);versions[item.id]=progressVersion(item)}state.read=state.read.slice(-5000);saveLedger();persist();render()}
   if(b.dataset.alertContext){const a=liveData?.alertState?.alerts.find(x=>x.id===b.dataset.alertContext);if(!a)return;
-   if(a.type==='news'){const event=events.find(x=>(a.evidence?.eventId&&x.newsId===a.evidence.eventId)||(a.evidence?.url&&(x.url===a.evidence.url||x.relatedItems?.some(r=>r.url===a.evidence.url))));if(event){openDetail(event.id);return}toast('该事件已不在当前缓存，可从记录打开来源原文');return}
+   if(['news','listing','funding','liquidation','flow'].includes(a.type)){const event=events.find(x=>(a.evidence?.eventId&&x.newsId===a.evidence.eventId)||(a.evidence?.url&&(x.url===a.evidence.url||x.relatedItems?.some(r=>r.url===a.evidence.url))));if(event){openDetail(event.id);return}toast('该事件已不在当前缓存，可从记录打开来源原文');return}
    alertContext=a;catchupOnly=false;state.project=a.p;state.view='feed';state.filter='all';state.query='';$('#search').value='';newsSource='all';$('#news-source').value='all';chartSettings.period=['1h','4h','1d'].includes(a.ruleSnapshot?.period)?a.ruleSnapshot.period:'4h';render();document.querySelector('.linked-chart')?.scrollIntoView({behavior:'smooth',block:'center'});
   }
   if(b.hasAttribute('data-alert-back')){alertContext=null;state.project=null;state.view='rules';render()}

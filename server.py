@@ -19,6 +19,7 @@ import features
 import team_news
 import alerts
 import charts
+import intelligence
 import preferences
 import rootdata_monitor
 import runtime_config as config
@@ -26,6 +27,7 @@ from collection_state import social_result,merge_news
 from event_clusters import cluster
 
 ROOT=Path(__file__).resolve().parent
+INTELLIGENCE=intelligence.Store(config.DATA_DIR/'intelligence.json')
 ALERT_STORE=alerts.Store(config.DATA_DIR/'alerts.json')
 PREFERENCES=preferences.Store(config.DATA_DIR/'preferences.json')
 CHART_CACHE={}
@@ -199,6 +201,7 @@ def provider_news(p):
      if not tid.isdigit() or author.lower()!=p['account'].lower():continue
      e=news_event(p['id'],row.get('text','')[:140],'https://x.com/'+author+'/status/'+tid,timestamp(row.get('createdAt','')),'X · @'+author,row.get('text',''))
     else:
+     if intelligence.kind(row):continue
      url=row.get('link','');text=row.get('text','');coins=[x.get('symbol','').upper() for x in (row.get('coins') or [])]
      # The provider's coin mapping is necessary, but ambiguous English words alone are insufficient.
      if not url.startswith('https://') or not relevant(p['id'],text,p):continue
@@ -294,6 +297,24 @@ def alert_snapshot():
   if a.get('type')=='news':a['titleZh']=features.translated(a.get('title',''))
  return result
 
+def intelligence_loop():
+ while True:
+  try:
+   with LOCK:projects=list(PROJECTS)
+   INTELLIGENCE.collect(projects,request,timestamp,TOKEN)
+   snap=INTELLIGENCE.snapshot()
+   with LOCK:
+    DATA['intelligenceEvents']=snap['events']
+    DATA['calendarTexts']=[item['title'] for item in snap['calendar'].get('items',[])]
+  except Exception as e:print('Intelligence collection failed: '+type(e).__name__,flush=True)
+  time.sleep(300)
+
+def intelligence_snapshot():
+ result=INTELLIGENCE.snapshot()
+ result['events']=[features.localize(e) for e in result['events']]
+ for item in result['calendar'].get('items',[]):item['titleZh']=features.translated(item['title'])
+ return result
+
 def alert_loop():
  while True:
   try:
@@ -303,7 +324,7 @@ def alert_loop():
    for pid,period in pairs:
     try:markets[(pid,period)]=alerts.chart_market(markets.get(pid),chart_data(pid,period))
     except Exception:markets[(pid,period)]={}
-   ALERT_STORE.tick(markets,news,now())
+   ALERT_STORE.tick(markets,news+INTELLIGENCE.snapshot()['events'],now())
   except Exception as e:
    print('Alert evaluation failed: '+type(e).__name__,flush=True)
   time.sleep(20)
@@ -393,9 +414,9 @@ class Handler(SimpleHTTPRequestHandler):
    except Exception:self.json_response({'error':'搜索服务暂不可用，可以手动填写项目信息'},502)
    return
   if self.path=='/api/live':
-   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in cluster(curate(DATA['events'],projects=PROJECTS))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
+   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in cluster(curate(DATA['events'],projects=PROJECTS))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
-  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js']:
+  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js']:
    self.send_error(404);return
   super().do_GET()
  def json_response(self,value,status=200):
@@ -465,6 +486,7 @@ if __name__=='__main__':
  threading.Thread(target=logo_loop,daemon=True).start()
  threading.Thread(target=rootdata_loop,daemon=True).start()
  threading.Thread(target=alert_loop,daemon=True).start()
+ threading.Thread(target=intelligence_loop,daemon=True).start()
  threading.Thread(target=features.translation_loop,args=(DATA,LOCK,request),daemon=True).start()
  print('Signal live reader ready',flush=True)
  try:httpd.serve_forever()
