@@ -18,6 +18,7 @@ class ClusterTests(unittest.TestCase):
  def test_changed_numeric_claims_not_merged_by_text(self):
   text='NEAR Protocol '+('this upgrade improves infrastructure and performance for every developer building decentralized applications across the network '*4)
   self.assertEqual(len(cluster([self.event('1',text+' 100 million'),self.event('2',text+' 200 million')])),2)
- def test_short_generic_headlines_are_not_merged(self):
-  self.assertEqual(len(cluster([self.event('1','NEAR launches upgrade'),self.event('2','NEAR launches upgrade')])),2)
+ def test_exact_short_posts_merge_only_in_two_hour_window(self):
+  self.assertEqual(len(cluster([self.event('1','NEAR launches upgrade'),self.event('2','NEAR launches upgrade')])),1)
+  self.assertEqual(len(cluster([self.event('1','NEAR launches upgrade'),self.event('2','NEAR launches upgrade',date=3*3600000)])),2)
 if __name__=='__main__':unittest.main()

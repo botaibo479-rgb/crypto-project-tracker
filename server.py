@@ -20,6 +20,8 @@ import team_news
 import alerts
 import charts
 import intelligence
+import reader_quality
+import delivery
 import preferences
 import rootdata_monitor
 import runtime_config as config
@@ -28,6 +30,7 @@ from event_clusters import cluster
 
 ROOT=Path(__file__).resolve().parent
 INTELLIGENCE=intelligence.Store(config.DATA_DIR/'intelligence.json')
+DELIVERY=delivery.Store(config.DATA_DIR/'delivery.json')
 ALERT_STORE=alerts.Store(config.DATA_DIR/'alerts.json')
 PREFERENCES=preferences.Store(config.DATA_DIR/'preferences.json')
 CHART_CACHE={}
@@ -69,6 +72,9 @@ TOKEN=os.environ.get('OPENNEWS_TOKEN','')
 if os.environ.get('SIGNAL_ENV_FILE'):
  for line in Path(os.environ['SIGNAL_ENV_FILE']).read_text().splitlines():
   if line.startswith('OPENNEWS_TOKEN='): TOKEN=line.split('=',1)[1].strip().strip('"\'')
+  if '=' in line:
+   key,value=line.split('=',1)
+   if key in {'SIGNAL_PUSH_ENABLED','SIGNAL_NTFY_URL','SIGNAL_NTFY_TOKEN'}:os.environ.setdefault(key,value.strip().strip('"\''))
 
 def now():return int(time.time()*1000)
 def request(url,payload=None):
@@ -78,15 +84,17 @@ def request(url,payload=None):
   headers['Authorization']='Bearer '+TOKEN
  raw=json.dumps(payload).encode() if payload is not None else None
  if raw:headers['Content-Type']='application/json'
- for attempt in range(2):
+ calendar_query=url=='https://ai.6551.io/open/finance-enhance/key-market-events'
+ attempts=1 if calendar_query else 2
+ for attempt in range(attempts):
   try:
-   with urllib.request.urlopen(urllib.request.Request(url,data=raw,headers=headers),timeout=18) as r:return r.read(6_000_000).decode('utf-8')
+   with urllib.request.urlopen(urllib.request.Request(url,data=raw,headers=headers),timeout=35 if calendar_query else 18) as r:return r.read(6_000_000).decode('utf-8')
   except urllib.error.HTTPError as e:
    # Authorization failures are final; only retry temporary read-query failures.
-   if attempt or e.code not in [502,503,504]:raise
+   if attempt+1>=attempts or e.code not in [502,503,504]:raise
    time.sleep(1)
   except (TimeoutError,urllib.error.URLError):
-   if attempt:raise
+   if attempt+1>=attempts:raise
    time.sleep(1)
 
 def api(path,params):return json.loads(request('https://fapi.binance.com'+path+'?'+urllib.parse.urlencode(params)))
@@ -119,7 +127,7 @@ def market(p):
   if a and b and len(values)>=361:
    crossUp=values[-2]<=max(a[-2],b[-2]) and values[-1]>max(a[-1],b[-1])
    crossDown=values[-2]>=min(a[-2],b[-2]) and values[-1]<min(a[-1],b[-1])
-   result.update(ema200=a[-1],ema360=b[-1],close4h=values[-1],candleAt=int(ks[-1][6]),above200=values[-1]>a[-1],above360=values[-1]>b[-1],cross='up' if crossUp else 'down' if crossDown else None,klineCount=len(values),spark=values[-30:])
+   result.update(previousEma200=a[-2],ema200=a[-1],ema360=b[-1],close4h=values[-1],candleAt=int(ks[-1][6]),above200=values[-1]>a[-1],above360=values[-1]>b[-1],cross='up' if crossUp else 'down' if crossDown else None,klineCount=len(values),spark=values[-30:])
   else:result['errors']['ema']='已收盘 K 线不足 361 根'
  if isinstance(parts.get('oi'),list) and len(parts['oi'])>=2:
   rows=sorted(parts['oi'],key=lambda x:int(x['timestamp']));first,last=rows[0],rows[-1];span=int(last['timestamp'])-int(first['timestamp']);base=float(first['sumOpenInterest'])
@@ -187,7 +195,9 @@ def public_news(p):
 def provider_news(p):
  out=[];statuses={}
  if not TOKEN:return [],{'OpenNews':{'status':'missing_credential','message':'未配置 OPENNEWS_TOKEN'},'OpenTwitter':{'status':'missing_credential','message':'未连接；团队和 KOL 尚未采集'}}
- tasks={'OpenNews':('news_search',{'coins':[p['symbol']],'limit':30,'page':1}),'OpenNews关键词':('news_search',{'q':QUERIES[p['id']],'limit':30,'page':1}),'OpenTwitter':('twitter_user_tweets',{'username':p['account'],'maxResults':20,'includeReplies':True,'includeRetweets':False,'product':'Latest'})}
+ extra=[str(v).replace(chr(34),'').replace(chr(92),'') for v in p.get('aliases',[])[:4]+p.get('contracts',[])[:2]]
+ query=QUERIES[p['id']]+''.join(' OR '+chr(34)+v+chr(34) for v in extra)
+ tasks={'OpenNews':('news_search',{'coins':[p['symbol']],'limit':30,'page':1}),'OpenNews关键词':('news_search',{'q':query,'limit':30,'page':1}),'OpenTwitter':('twitter_user_tweets',{'username':p['account'],'maxResults':20,'includeReplies':True,'includeRetweets':False,'product':'Latest'})}
  for name,(path,payload) in tasks.items():
   try:
    response=json.loads(request('https://ai.6551.io/open/'+path,payload));rows=response.get('data',[])
@@ -207,6 +217,7 @@ def provider_news(p):
      if not url.startswith('https://') or not relevant(p['id'],text,p):continue
      e=news_event(p['id'],text[:140],url,timestamp(row.get('ts')),str(row.get('newsType','OpenNews')),text)
     e['channel']='x' if name=='OpenTwitter' else 'opennews'
+    if name=='OpenTwitter':e.update(isReply=bool(row.get('isReply') or row.get('inReplyToStatusId')),isRetweet=bool(row.get('isRetweet')))
     if name!='OpenTwitter':
      rating=row.get('aiRating') or {}
      e['providerRating']={'score':rating.get('score'),'summary':rating.get('summary'),'status':rating.get('status')}
@@ -297,6 +308,18 @@ def alert_snapshot():
   if a.get('type')=='news':a['titleZh']=features.translated(a.get('title',''))
  return result
 
+def digest_inputs():
+ with LOCK:rows=list(DATA['events']);projects=list(PROJECTS)
+ hidden=PREFERENCES.snapshot().get('hiddenProjects',[])
+ return [features.localize(e) for e in reader_quality.presentation(cluster(curate(rows,projects=projects)))],[p for p in projects if p['id'] not in hidden]
+
+def delivery_loop():
+ while True:
+  try:
+   rows,projects=digest_inputs();DELIVERY.tick(rows,projects,ALERT_STORE.snapshot()['alerts'])
+  except Exception:print('Digest/delivery check failed',flush=True)
+  time.sleep(60)
+
 def intelligence_loop():
  while True:
   try:
@@ -319,8 +342,9 @@ def alert_loop():
  while True:
   try:
    with LOCK:
-    markets=dict(DATA['markets']);news=cluster(curate(list(DATA['events']),projects=PROJECTS))
-   pairs={(r['p'],r['period']) for r in ALERT_STORE.snapshot()['rules'] if r['on'] and r['type'] in {'ema','level','combo'} and r['period']!='4h'}
+    markets=dict(DATA['markets']);grouped=reader_quality.presentation(cluster(curate(list(DATA['events']),projects=PROJECTS)))
+    news=[{**event,'p':pid} for event in grouped for pid in event.get('projectIds',[event['p']])]
+   pairs={(r['p'],r['period']) for r in ALERT_STORE.snapshot()['rules'] if r['on'] and r['type'] in {'ema','ema200','level','combo'} and r['period']!='4h'}
    for pid,period in pairs:
     try:markets[(pid,period)]=alerts.chart_market(markets.get(pid),chart_data(pid,period))
     except Exception:markets[(pid,period)]={}
@@ -401,6 +425,10 @@ class Handler(SimpleHTTPRequestHandler):
    self.send_error(403);return
   if self.path=='/api/preferences':
    self.json_response({'values':PREFERENCES.snapshot()});return
+  if self.path=='/api/digest':
+   rows,projects=digest_inputs();self.json_response(delivery.make_digest(rows,projects));return
+  if self.path=='/api/delivery':
+   self.json_response(DELIVERY.status());return
   if self.path=='/healthz':
    self.json_response({'status':'ok'});return
   if self.path.startswith('/api/chart?'):
@@ -414,9 +442,9 @@ class Handler(SimpleHTTPRequestHandler):
    except Exception:self.json_response({'error':'搜索服务暂不可用，可以手动填写项目信息'},502)
    return
   if self.path=='/api/live':
-   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in cluster(curate(DATA['events'],projects=PROJECTS))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
+   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in reader_quality.presentation(cluster(curate(DATA['events'],projects=PROJECTS)))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
-  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js']:
+  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js','/reader.js']:
    self.send_error(404);return
   super().do_GET()
  def json_response(self,value,status=200):
@@ -431,6 +459,12 @@ class Handler(SimpleHTTPRequestHandler):
    payload=json.loads(self.rfile.read(length))
    if self.path=='/api/preferences':
     result,status=PREFERENCES.update(payload);self.json_response(result,status);return
+   if self.path=='/api/delivery/test':
+    DELIVERY.test();self.json_response({'ok':True});return
+   if self.path=='/api/delivery/hour':
+    DELIVERY.set_hour(payload.get('hour'));self.json_response({'ok':True});return
+   if self.path=='/api/rules/template':
+    self.json_response({'rules':ALERT_STORE.batch(payload,[p['id'] for p in PROJECTS])});return
    if self.path=='/api/rules':
     self.json_response({'rule':ALERT_STORE.upsert(payload,[p['id'] for p in PROJECTS])});return
    if self.path=='/api/rules/action':
@@ -487,6 +521,7 @@ if __name__=='__main__':
  threading.Thread(target=rootdata_loop,daemon=True).start()
  threading.Thread(target=alert_loop,daemon=True).start()
  threading.Thread(target=intelligence_loop,daemon=True).start()
+ threading.Thread(target=delivery_loop,daemon=True).start()
  threading.Thread(target=features.translation_loop,args=(DATA,LOCK,request),daemon=True).start()
  print('Signal live reader ready',flush=True)
  try:httpd.serve_forever()

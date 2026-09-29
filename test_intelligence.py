@@ -1,6 +1,6 @@
 import unittest,tempfile,json
 from pathlib import Path
-from intelligence import normalize,merge,calendar_rows,listing_type,Store
+from intelligence import normalize,merge,calendar_rows,calendar_error,listing_type,Store
 from alerts import evaluate,validate
 NOW=1800000000000
 P={'id':'near','name':'NEAR Protocol','symbol':'NEAR','account':'NEARProtocol'}
@@ -35,3 +35,17 @@ class IntelligenceTests(unittest.TestCase):
    store.collect([P],request,lambda x:x,True)
    self.assertEqual(store.snapshot()['sources']['公告']['status'],'error')
    self.assertNotIn('private',json.dumps(store.snapshot()))
+
+ def test_calendar_diagnostics_are_specific_and_redacted(self):
+  import urllib.error
+  self.assertEqual(calendar_error(urllib.error.HTTPError('https://example.test',403,'private token',{},None))['errorCode'],'http_403')
+  self.assertEqual(calendar_error(urllib.error.URLError(TimeoutError()))['errorCode'],'timeout')
+  self.assertEqual(calendar_error(ValueError('calendar_shape'))['errorCode'],'schema')
+  self.assertNotIn('private',json.dumps(calendar_error(ValueError('private token'))))
+
+ def test_provider_query_failure_classification_does_not_save_body(self):
+  import urllib.error,io
+  error=urllib.error.HTTPError('https://example.test',400,'Bad Request',{},io.BytesIO(b'{"error":"query failed","private":"secret"}'))
+  result=calendar_error(error)
+  self.assertEqual(result['errorCode'],'provider_query_failed');self.assertEqual(result['httpStatus'],400)
+  self.assertNotIn('secret',json.dumps(result));error.close()

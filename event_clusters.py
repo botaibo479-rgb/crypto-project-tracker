@@ -17,6 +17,9 @@ def references(e):
 def same_event(a,b):
  if a['p']!=b['p']:return None
  if not a.get('publishedAt') or not b.get('publishedAt') or abs(a['publishedAt']-b['publishedAt'])>48*3600000:return None
+ from reader_quality import normalized
+ ta,tb=normalized(a.get('summary') or a.get('title')),normalized(b.get('summary') or b.get('title'))
+ if ta and ta==tb and len(ta)>=12 and abs(a['publishedAt']-b['publishedAt'])<=2*3600000:return '标准化正文一致，发布时间相差不超过 2 小时'
  if references(a)&references(b):return '共同引用同一篇原文，发布时间相差不超过 48 小时'
  def words(e):return re.findall(r'[a-z0-9]+|[\u4e00-\u9fff]',re.sub(r'https?://\S+','',e.get('summary','')).lower())
  wa,wb=words(a),words(b)

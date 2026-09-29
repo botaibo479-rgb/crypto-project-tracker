@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from news_quality import relevant
 
 def project_related(project,text):
+ if any(w.casefold() in text.casefold() for w in project.get('excludeTerms',[])):return False
  account=project.get('account','')
  return bool(relevant(project['id'],text,project) or (account and re.search(r'(?<!\w)@'+re.escape(account)+r'\b',text,re.I)))
 

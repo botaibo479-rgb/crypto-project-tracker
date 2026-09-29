@@ -1,5 +1,5 @@
 """Evidence-preserving OpenNews signals and macro calendar; no trading actions."""
-import datetime as dt,hashlib,html,json,re,threading,time
+import datetime as dt,hashlib,html,json,re,threading,time,urllib.error
 from pathlib import Path
 from html.parser import HTMLParser
 LABELS={'listing':'交易所公告','funding':'资金费率','liquidation':'大额清算','flow':'资金动态','oi':'短时 OI','price':'价格异动'}
@@ -46,6 +46,22 @@ def merge(old,new,current):
  rows={e['id']:e for e in old if 0<=current-e.get('publishedAt',0)<=7*86400000}
  for e in new:rows[e['id']]={**e,'discoveredAt':rows.get(e['id'],e)['discoveredAt']}
  return sorted(rows.values(),key=lambda e:e['publishedAt'],reverse=True)[:1500]
+def calendar_error(error):
+ # Persist only allowlisted classifications, never raw provider bodies or exception messages.
+ if isinstance(error,urllib.error.HTTPError):
+  code=error.code
+  if code==400:
+   try:
+    body=json.loads(error.read(4096))
+    if body.get('error')=='query failed':return {'errorCode':'provider_query_failed','errorMessage':'供应方日历查询失败；普通新闻接口可单独使用','httpStatus':400}
+   except (ValueError,OSError,AttributeError):pass
+  label={400:'供应方拒绝请求，需核对接口参数或服务状态',401:'凭证认证失败',403:'此接口访问被拒绝，请核对权限',404:'供应方接口不存在',429:'供应方限流，稍后重试'}.get(code,'供应方 HTTP 错误')
+  return {'errorCode':'http_'+str(code),'errorMessage':label,'httpStatus':code}
+ if isinstance(error,TimeoutError) or isinstance(error,urllib.error.URLError) and isinstance(error.reason,TimeoutError):
+  return {'errorCode':'timeout','errorMessage':'连接或读取超时，未取得日历结果'}
+ if isinstance(error,urllib.error.URLError):return {'errorCode':'network','errorMessage':'网络连接失败，未取得日历结果'}
+ if isinstance(error,ValueError) and str(error)=='calendar_shape':return {'errorCode':'schema','errorMessage':'供应方日历格式暂不兼容'}
+ return {'errorCode':'provider_response','errorMessage':'供应方未返回可用的日历结果'}
 def calendar_rows(response,stamp):
  if response.get('success') is False:raise ValueError('calendar_failed')
  data=response.get('data',{})
@@ -89,15 +105,17 @@ class Store:
      self.data['events']=merge(self.data['events'],incoming,current);self.data['sources'][label]={'status':'ok','lastSuccessAt':current,'count':len(incoming),'returned':len(response['data']),'limited':len(response['data'])>=100}
    except Exception:
     with self.lock:self.data['sources'][label]={**self.data['sources'].get(label,{}),'status':'error','lastAttemptAt':current}
-  with self.lock:last=self.data['calendar'].get('lastAttemptAt',0)
+  with self.lock:
+   calendar=self.data['calendar'];last=calendar.get('lastAttemptAt',0)
+   if calendar.get('status')=='error' and not calendar.get('errorCode'):last=0
   if current-last>=3600000:
    try:
     today=dt.datetime.now(dt.timezone.utc).date()
     response=json.loads(request('https://ai.6551.io/open/finance-enhance/key-market-events',{'start_date':str(today),'end_date':str(today+dt.timedelta(days=14)),'importance':'high','limit':50}))
     items=calendar_rows(response,stamp)
     with self.lock:self.data['calendar']={'status':'ok','items':items,'lastSuccessAt':current,'lastAttemptAt':current}
-   except Exception:
-    with self.lock:self.data['calendar']={**self.data['calendar'],'status':'error','lastAttemptAt':current}
+   except Exception as error:
+    with self.lock:self.data['calendar']={**self.data['calendar'],'status':'error','lastAttemptAt':current,**calendar_error(error)}
   with self.lock:
    self.data['events']=merge(self.data['events'],[],current)
    self.path.parent.mkdir(parents=True,exist_ok=True);tmp=self.path.with_suffix('.tmp');tmp.write_text(json.dumps(self.data,ensure_ascii=False));tmp.replace(self.path)

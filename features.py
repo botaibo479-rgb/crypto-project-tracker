@@ -135,7 +135,17 @@ def confirm_project(payload):
  project=prepare_project({k:v for k,v in payload.items() if k!='coinId'},None)
  if coin:
   project.update(id=coin,coinId=coin,identity='参考 CoinGecko 项目资料，由用户确认；身份尚未独立核实',identitySource='https://www.coingecko.com/en/coins/'+coin)
+ project.update(match_fields(payload))
  return project
+
+def match_fields(payload):
+ result={}
+ for key in ['aliases','contracts','excludeTerms']:
+  raw=payload.get(key,[])
+  values=[x.strip() for x in re.split(r'[,，\n]',raw) if x.strip()] if isinstance(raw,str) else raw
+  if not isinstance(values,list) or len(values)>12 or any(not isinstance(x,str) or not 2<=len(x)<=100 or '<' in x or '>' in x for x in values):raise ValueError('别名、合约地址与排除词每项 2–100 字，最多 12 项')
+  result[key]=list(dict.fromkeys(values))
+ return result
 
 def enrich_avatars(accounts,request):
  def apply(a,cached):
