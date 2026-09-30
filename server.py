@@ -5,13 +5,11 @@ import datetime as dt
 import email.utils
 import hashlib
 import json
-import os
 import re
 import threading
 import time
 import urllib.request
 import urllib.parse
-import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -29,6 +27,8 @@ import public_sources
 import project_calendar
 import rootdata_monitor
 import runtime_config as config
+import credentials
+import http_clients
 from collection_state import social_result, merge_news
 from event_clusters import cluster
 
@@ -144,61 +144,36 @@ DATA = {
     "collectors": {},
 }
 CACHE = config.DATA_DIR / "live-cache.json"
-TOKEN = os.environ.get("OPENNEWS_TOKEN", "")
-# Only load a configuration path explicitly supplied to this application; never search other projects.
-if os.environ.get("SIGNAL_ENV_FILE"):
-    for line in Path(os.environ["SIGNAL_ENV_FILE"]).read_text().splitlines():
-        if line.startswith("OPENNEWS_TOKEN="):
-            TOKEN = line.split("=", 1)[1].strip().strip("\"'")
-        if "=" in line:
-            key, value = line.split("=", 1)
-            if key in {
-                "SIGNAL_PUSH_ENABLED",
-                "SIGNAL_NTFY_URL",
-                "SIGNAL_NTFY_TOKEN",
-                "SIGNAL_RSSHUB_URL",
-                "DEFILLAMA_API_KEY",
-            }:
-                os.environ.setdefault(key, value.strip().strip("\"'"))
+# Credentials come only from the systemd credential store, a private *_FILE,
+# the environment, or this project's private .env.local (see credentials.py).
+TOKEN = credentials.load("OPENNEWS_TOKEN", "opennews_token")
+DEFILLAMA_KEY = credentials.load("DEFILLAMA_API_KEY", "defillama_key")
 
 
 def now():
     return int(time.time() * 1000)
 
 
-PUBLIC_SOURCES.rsshub = os.environ.get("SIGNAL_RSSHUB_URL", "")
+PUBLIC_SOURCES.rsshub = credentials.setting("SIGNAL_RSSHUB_URL")
+
+
+CALENDAR_URL = "https://ai.6551.io/open/finance-enhance/key-market-events"
 
 
 def request(url, payload=None):
-    headers = {
-        "User-Agent": "SignalReader/0.2",
-        "Accept": "application/json, application/xml, text/html",
-    }
-    if url.startswith("https://ai.6551.io/"):
-        if not TOKEN:
-            raise ValueError("missing_credential")
-        headers["Authorization"] = "Bearer " + TOKEN
-    raw = json.dumps(payload).encode() if payload is not None else None
-    if raw:
-        headers["Content-Type"] = "application/json"
-    calendar_query = url == "https://ai.6551.io/open/finance-enhance/key-market-events"
-    attempts = 1 if calendar_query else 2
-    for attempt in range(attempts):
-        try:
-            with urllib.request.urlopen(
-                urllib.request.Request(url, data=raw, headers=headers),
-                timeout=35 if calendar_query else 18,
-            ) as r:
-                return r.read(6_000_000).decode("utf-8")
-        except urllib.error.HTTPError as e:
-            # Authorization failures are final; only retry temporary read-query failures.
-            if attempt + 1 >= attempts or e.code not in [502, 503, 504]:
-                raise
-            time.sleep(1)
-        except (TimeoutError, urllib.error.URLError):
-            if attempt + 1 >= attempts:
-                raise
-            time.sleep(1)
+    """Single outbound chokepoint; see http_clients for the policy."""
+    if urllib.parse.urlsplit(url).hostname in http_clients.DIRECT_HOSTS:
+        calendar_query = url == CALENDAR_URL
+        return http_clients.direct(
+            url,
+            payload,
+            token=TOKEN,
+            timeout=35 if calendar_query else 18,
+            attempts=1 if calendar_query else 2,
+        )
+    if payload is not None:
+        raise ValueError("post_not_allowed")
+    return http_clients.public_text(url)
 
 
 def api(path, params):
@@ -448,21 +423,11 @@ def public_news(p):
                 out.append(e)
         return out[:8]
     if pid == "pha":
-        xml = request("https://phala.com/atom.xml")
-        root = ET.fromstring(xml)
-        for item in root.findall("{http://www.w3.org/2005/Atom}entry")[:8]:
-            ns = {"a": "http://www.w3.org/2005/Atom"}
-            link = item.find("a:link", ns)
+        url = "https://phala.com/atom.xml"
+        for item in public_sources.parse_feed(request(url), url)[:8]:
             out.append(
                 news_event(
-                    pid,
-                    item.findtext("a:title", "", ns),
-                    link.get("href", "") if link is not None else "",
-                    timestamp(
-                        item.findtext("a:published", "", ns)
-                        or item.findtext("a:updated", "", ns)
-                    ),
-                    "Phala 官方 RSS",
+                    pid, item["title"], item["url"], item["at"], "Phala 官方 RSS"
                 )
             )
         return out
@@ -943,7 +908,7 @@ def project_calendar_loop():
     while True:
         with LOCK:
             projects = [dict(p) for p in PROJECTS]
-        PROJECT_CALENDAR.collect(projects, os.environ.get("DEFILLAMA_API_KEY", ""))
+        PROJECT_CALENDAR.collect(projects, DEFILLAMA_KEY)
         time.sleep(21600)
 
 
@@ -1244,13 +1209,10 @@ class Handler(SimpleHTTPRequestHandler):
                         )
                         target.update(calendarSlug=slug, calendarProtocolId=ident)
                         save_projects()
-                    if os.environ.get("DEFILLAMA_API_KEY"):
+                    if DEFILLAMA_KEY:
                         threading.Thread(
                             target=PROJECT_CALENDAR.collect,
-                            args=(
-                                [dict(p) for p in PROJECTS],
-                                os.environ["DEFILLAMA_API_KEY"],
-                            ),
+                            args=([dict(p) for p in PROJECTS], DEFILLAMA_KEY),
                             daemon=True,
                         ).start()
                 else:
@@ -1260,10 +1222,6 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path == "/api/preferences":
                 result, status = PREFERENCES.update(payload)
                 self.json_response(result, status)
-                return
-            if self.path == "/api/delivery/test":
-                DELIVERY.test()
-                self.json_response({"ok": True})
                 return
             if self.path == "/api/delivery/hour":
                 DELIVERY.set_hour(payload.get("hour"))
@@ -1418,9 +1376,6 @@ if __name__ == "__main__":
     threading.Thread(target=intelligence_loop, daemon=True).start()
     threading.Thread(target=delivery_loop, daemon=True).start()
     threading.Thread(target=project_calendar_loop, daemon=True).start()
-    threading.Thread(
-        target=features.translation_loop, args=(DATA, LOCK, request), daemon=True
-    ).start()
     print("Signal live reader ready", flush=True)
     try:
         httpd.serve_forever()

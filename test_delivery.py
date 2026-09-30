@@ -1,7 +1,7 @@
 import unittest, tempfile, datetime as dt, os
 from unittest.mock import patch
 from pathlib import Path
-from delivery import Store, make_digest, ntfy_config
+from delivery import Store, make_digest
 
 
 class DeliveryTests(unittest.TestCase):
@@ -39,54 +39,6 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(result["date"], "2026-09-29")
         self.assertEqual(len(result["items"]), 3)
         self.assertFalse(any(i["id"] in ["noise", "today"] for i in result["items"]))
-
-    def test_config_is_opt_in_and_no_arbitrary_webhook(self):
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertIsNone(ntfy_config())
-        with patch.dict(
-            os.environ,
-            {
-                "SIGNAL_PUSH_ENABLED": "1",
-                "SIGNAL_NTFY_URL": "https://localhost/private",
-            },
-            clear=True,
-        ):
-            with self.assertRaises(ValueError):
-                ntfy_config()
-
-    def test_no_historical_push_and_no_duplicate_on_restart(self):
-        with (
-            tempfile.TemporaryDirectory() as d,
-            patch.dict(
-                os.environ,
-                {
-                    "SIGNAL_PUSH_ENABLED": "1",
-                    "SIGNAL_NTFY_URL": "https://ntfy.sh/private-topic-example",
-                },
-                clear=True,
-            ),
-        ):
-            store = Store(Path(d) / "state.json")
-            current = dt.datetime(2026, 9, 30, 7).astimezone()
-            now = int(current.timestamp() * 1000)
-            sent = []
-            sender = lambda *a: sent.append(a)
-            alert = {
-                "id": "a",
-                "at": now - 10,
-                "ruleName": "OI",
-                "title": "test",
-                "evidence": {},
-            }
-            store.tick([], [], [alert], current, sender)
-            self.assertEqual(sent, [])
-            alert["at"] = now + 1000
-            store.tick([], [], [alert], current + dt.timedelta(seconds=2), sender)
-            self.assertEqual(len(sent), 1)
-            Store(Path(d) / "state.json").tick(
-                [], [], [alert], current + dt.timedelta(seconds=3), sender
-            )
-            self.assertEqual(len(sent), 1)
 
     def test_daily_digest_persists_once_after_hour_without_push(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {}, clear=True):

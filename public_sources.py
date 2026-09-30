@@ -1,6 +1,6 @@
 """Bounded, credential-free RSS/Atom discovery and collection. Python stdlib only."""
 
-import datetime as dt, email.utils, hashlib, html, http.client, ipaddress, json, re, socket, ssl, threading, time, urllib.parse, urllib.request, xml.etree.ElementTree as ET
+import datetime as dt, email.utils, hashlib, html, http.client, ipaddress, json, os, re, socket, ssl, threading, time, urllib.parse, urllib.request, xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -21,23 +21,30 @@ def public_url(url):
     } or u.hostname.lower().endswith((".local", ".localhost")):
         raise ValueError("不能访问本地网络")
     try:
-        if not ipaddress.ip_address(u.hostname).is_global:
-            raise ValueError("不能访问本地网络")
+        literal = ipaddress.ip_address(u.hostname)
     except ValueError:
+        literal = None
         if re.fullmatch(r"[0-9.:]+", u.hostname):
             raise ValueError("不能访问本地网络")
+    if literal is not None and not literal.is_global:
+        raise ValueError("不能访问本地网络")
     return urllib.parse.urlunsplit(("https", u.netloc, u.path or "/", u.query, ""))
 
 
 class PublicHTTPS(http.client.HTTPSConnection):
     def connect(self):
         addresses = socket.getaddrinfo(self.host, 443, type=socket.SOCK_STREAM)
-        # Some desktop proxies return RFC 2544 synthetic addresses. Resolve that specific
-        # range through a fixed HTTPS DNS service, then still connect only to a public IP.
+        # Some desktop proxies return RFC 2544 synthetic addresses. Only when explicitly
+        # enabled, resolve that range through dns.google (which then sees the hostname),
+        # and still connect only to a public IP.
         synthetic = ipaddress.ip_network("198.18.0.0/15")
         if addresses and all(
             ipaddress.ip_address(a[4][0]) in synthetic for a in addresses
         ):
+            if os.environ.get("TRACKER_ALLOW_DOH") != "1":
+                raise ValueError(
+                    "合成 DNS 地址；如需经 dns.google 解析请设置 TRACKER_ALLOW_DOH=1"
+                )
             q = urllib.parse.urlencode(
                 {"name": self.host, "type": "A", "edns_client_subnet": "0.0.0.0/0"}
             )
@@ -57,11 +64,18 @@ class PublicHTTPS(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
-def fetch(url, headers=None):
+def site(host):
+    return ".".join(host.lower().rstrip(".").split(".")[-2:])
+
+
+def fetch(url, headers=None, *, same_site=False, max_bytes=2_000_000):
     # Pin the validated destination address; validate every redirect. Never forward credentials.
+    origin = site(urllib.parse.urlsplit(public_url(url)).hostname)
     for _ in range(4):
         url = public_url(url)
         u = urllib.parse.urlsplit(url)
+        if same_site and site(u.hostname) != origin:
+            raise ValueError("来源重定向到其他站点")
         c = PublicHTTPS(u.hostname, timeout=12)
         try:
             c.request(
@@ -85,8 +99,8 @@ def fetch(url, headers=None):
                 return "", {}, url, 304
             if r.status != 200:
                 raise ValueError("来源 HTTP " + str(r.status))
-            body = r.read(2_000_001)
-            if len(body) > 2_000_000:
+            body = r.read(max_bytes + 1)
+            if len(body) > max_bytes:
                 raise ValueError("来源内容过大")
             encoding = r.headers.get_content_charset() or "utf-8"
             return (

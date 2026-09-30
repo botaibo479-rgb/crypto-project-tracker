@@ -1,6 +1,6 @@
-"""Local daily digests and explicitly enabled ntfy delivery. No default outbound messages."""
+"""Local daily digests. Outbound delivery is handled by Hermes, never by this module."""
 
-import datetime as dt, hashlib, json, os, re, threading, time, urllib.request, urllib.parse
+import datetime as dt, json, re, threading, time
 from pathlib import Path
 
 
@@ -61,55 +61,6 @@ def make_digest(rows, projects, current=None):
     }
 
 
-def ntfy_config():
-    url = os.environ.get("SIGNAL_NTFY_URL", "").strip()
-    enabled = os.environ.get("SIGNAL_PUSH_ENABLED") == "1"
-    if not enabled:
-        return None
-    u = urllib.parse.urlsplit(url)
-    # The integration deliberately supports the public ntfy service only. Never follow redirects.
-    if (
-        u.scheme != "https"
-        or u.hostname != "ntfy.sh"
-        or u.port
-        or u.username
-        or u.password
-        or u.query
-        or u.fragment
-        or not re.fullmatch(r"/[A-Za-z0-9_-]{8,128}", u.path)
-    ):
-        raise ValueError("invalid_ntfy_configuration")
-    return {"url": url, "token": os.environ.get("SIGNAL_NTFY_TOKEN", "")}
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
-
-
-def send_ntfy(config, title, message):
-    headers = {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Title": "Signal update",
-        "Tags": "newspaper",
-    }
-    if config.get("token"):
-        headers["Authorization"] = "Bearer " + config["token"]
-    req = urllib.request.Request(
-        config["url"],
-        data=(title + "\n\n" + message)
-        .encode()[:4000]
-        .decode("utf-8", "ignore")
-        .encode(),
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.build_opener(NoRedirect).open(req, timeout=12) as response:
-        if response.status != 200:
-            raise ValueError("delivery_failed")
-        response.read(2048)
-
-
 class Store:
     def __init__(self, path):
         self.path = Path(path)
@@ -129,19 +80,14 @@ class Store:
         tmp.replace(self.path)
 
     def status(self):
-        try:
-            enabled = bool(ntfy_config())
-            status = "已配置，等待新提醒" if enabled else "默认关闭"
-        except ValueError:
-            enabled = False
-            status = "配置无效：需要 https://ntfy.sh/私有主题名，主题至少 8 字符"
+        # Outbound delivery is owned by Hermes cron; this reader never pushes itself.
         with self.lock:
             return {
-                "enabled": enabled,
-                "status": status,
+                "enabled": False,
+                "status": "由 Hermes 网关推送；本地阅读器不直接外发",
                 "digestHour": self.data["digestHour"],
                 "lastDigestAt": self.data.get("lastDigestAt"),
-                "deliveryResults": list(self.data["outbox"].values())[-10:],
+                "deliveryResults": [],
             }
 
     def set_hour(self, hour):
@@ -151,16 +97,10 @@ class Store:
             self.data["digestHour"] = hour
             self.save()
 
-    def test(self):
-        config = ntfy_config()
-        if not config:
-            raise ValueError("尚未启用 ntfy")
-        send_ntfy(config, "Signal 测试通知", "这是由你在本地阅读器点击发送的测试消息。")
-
-    def tick(self, rows, projects, alerts, current=None, sender=send_ntfy):
+    def tick(self, rows, projects, alerts, current=None):
+        """Persist yesterday's digest once per day after the configured hour."""
         current = current or dt.datetime.now().astimezone()
         now = int(current.timestamp() * 1000)
-        jobs = []
         with self.lock:
             day = str(current.date() - dt.timedelta(days=1))
             if (
@@ -171,66 +111,4 @@ class Store:
                 self.data["digests"][day] = digest
                 self.data["lastDigestAt"] = now
                 self.data["digests"] = dict(sorted(self.data["digests"].items())[-14:])
-                self.save()
-            digest = self.data["digests"].get(day)
-        try:
-            config = ntfy_config()
-        except ValueError:
-            return
-        if not config:
-            with self.lock:
-                if self.data.pop("destination", None) is not None:
-                    self.save()
-            return
-        fingerprint = hashlib.sha256(
-            (config["url"] + config["token"]).encode()
-        ).hexdigest()
-        with self.lock:
-            if self.data.get("destination") != fingerprint:
-                self.data.update(destination=fingerprint, enabledAt=now)
-                self.save()
-            since = self.data["enabledAt"]
-            for a in alerts:
-                if since < a.get("at", 0) <= now and now - a["at"] < 3600000:
-                    jobs.append(
-                        (
-                            "alert:" + a["id"],
-                            a["ruleName"],
-                            a["title"]
-                            + "\n"
-                            + str(a.get("evidence", {}).get("url") or ""),
-                        )
-                    )
-            if digest and digest["generatedAt"] > since:
-                body = (
-                    "\n\n".join(
-                        " / ".join(x["projectNames"])
-                        + "\n"
-                        + (x["titleZh"] or x["title"])[:220]
-                        + "\n"
-                        + (x["url"] or "")
-                        for x in digest["items"][:8]
-                    )
-                    or "昨日暂无已采集的有效资讯。"
-                )
-                jobs.append(("digest:" + day, "Signal 昨日要点 · " + day, body))
-        for key, title, body in jobs[:10]:
-            with self.lock:
-                if key in self.data["outbox"]:
-                    continue
-                self.data["outbox"][key] = {
-                    "kind": key.split(":")[0],
-                    "at": now,
-                    "status": "sending",
-                }
-                self.save()
-            try:
-                sender(config, title, body)
-                status = "sent"
-            except Exception:
-                status = "failed_or_unknown"
-            # A timeout might already have delivered. Never blindly resend an ambiguous response.
-            with self.lock:
-                self.data["outbox"][key]["status"] = status
-                self.data["outbox"] = dict(list(self.data["outbox"].items())[-500:])
                 self.save()

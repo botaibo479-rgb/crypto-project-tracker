@@ -8,54 +8,31 @@
 
 ## 一、准备运行环境
 
-只运行阅读器，准备 Python 3.12 或更高版本即可，不需要安装 Node.js、skills 或 AI 助手。如果还希望通过 AI 助手查询项目，再安装 Node.js 的 LTS 版本，并准备一个支持 skills 的助手。后面的 skills 安装步骤可以按需跳过。
+只运行阅读器，准备 Python 3.12 或更高版本即可，不需要安装 Node.js、skills 或 AI 助手。
 
-从 [Python 官网](https://www.python.org/downloads/)安装后，重新打开终端检查 Python 版本。下面两条 Node.js/npx 检查命令仅适用于需要安装 skills 的用户，安装入口为 [Node.js 官网](https://nodejs.org/en/download)。
+从 [Python 官网](https://www.python.org/downloads/)安装后，重新打开终端检查 Python 版本。
 
 ```bash
 python3 --version
-node --version
-npx --version
 ```
 
 Windows 可用 `py -3 --version` 检查 Python。下文的 `python3` 在 Windows 上相应换成 `py -3`。macOS 和 Linux 是本文主要操作环境，Windows 启动方式已提供，但未完成 Windows 真机验收。
 
 后台使用 Python 标准库，不需要先安装 pip 依赖，也没有 npm build 步骤。
 
-## 二、注册 NewsLiquid，取得自己的 Token
+## 二、取得自己的 OpenNews / OpenTwitter Token
 
-打开 [NewsLiquid 注册入口](https://app.newsliquid.com?code=PC9PTKVS)。这是带邀请码的链接，邀请码为 `PC9PTKVS`。
+在浏览器地址栏**手动输入** `https://app.newsliquid.com/mcp`（6551 官方 MCP 仓库指向的凭证页），登录后在该页面获取或管理 API Token。不要使用他人分享的带邀请码链接或搜索广告链接，也不要使用陌生人共享的 Token。
 
-找到 Connect 或登录入口。本文核对页面时，登录弹窗显示 Google 登录和钱包入口，下方还有 Sign Up。没有账号先按页面提示注册，已有账号直接登录。选择自己常用的方式，验证与授权由本人完成。
+套餐与额度以官方结算页和 [官方会员说明](https://docs.newsliquid.com/plans-and-points) 为准。本地版采用定时查询，不需要 WSS 实时推送权限；实际消耗取决于关注项目数、返回消息数和采集频率。
 
-登录后打开 [MCP 页面](https://app.newsliquid.com/mcp)，查找 API Token 的获取或管理入口。
-
-第一次跟着教程搭建，建议先购买最低价的付费会员 **Plus，1.90 USDT／月（约 1.9 U）**，用少量项目测试新闻查询、推特数据和本地阅读流程。觉得好用，再根据额度与功能需求考虑升级 **Pro** 或 **Max**。目前官方列出的月付价格分别为 Pro 29 USDT、Max 99 USDT。
-
-Plus 包含基础 API、推特和新闻数据查询，适合先做小范围测试。Pro 提供更高额度和更多功能，Max 还包含新闻与推特 WSS 实时推送。本教程的本地版使用定时查询，不需要为了跟着教程操作就直接购买 Max。实际消耗取决于关注项目、返回消息数和采集频率，不能保证最低套餐够持续运行整月。
-
-从 [NewsLiquid 注册入口](https://app.newsliquid.com?code=PC9PTKVS)登录后，在 MCP 页面选择升级计划，核对 Plus 套餐、订阅周期和金额，再由本人完成购买。价格和权益以结算页为准，详情见 [官方会员说明](https://docs.newsliquid.com/plans-and-points)。
-
-OpenTwitter 用于查询公开 X 资料、推文及搜索结果；OpenNews 用于检索新闻。两个 skills 当前使用同一个环境变量 `OPENNEWS_TOKEN`，认证请求发往 `https://ai.6551.io`。可对照 [OpenTwitter 官方 skill](https://github.com/6551Team/opentwitter-mcp/blob/main/openclaw-skill/opentwitter/SKILL.md)与 [OpenNews 官方仓库](https://github.com/6551Team/opennews-mcp)。
+OpenTwitter 用于查询公开 X 资料、推文及搜索结果；OpenNews 用于检索新闻。二者使用同一个环境变量 `OPENNEWS_TOKEN`，认证请求只发往 `https://ai.6551.io`。
 
 把 Token 留在自己的本地配置中。不要放到 GitHub、聊天截图或网页前端。后面的配置工具会隐藏输入，不把 Token 写入终端命令历史。
 
-## 三、安装 OpenTwitter 和 OpenNews skills
+## 三、不建议安装 curl 型 opennews / opentwitter skills
 
-在准备让 AI 助手工作的目录里，依次运行。
-
-```bash
-npx skills add 6551Team/opennews-mcp
-npx skills add 6551Team/opentwitter-mcp
-```
-
-首次运行 npx 可能询问是否下载 skills 工具，核对包名和来源后继续。安装器会根据版本显示 skill、目标助手和安装范围等选项，选择你实际使用的助手。只用于这个项目就选项目级安装，希望其他项目也能调用则选全局安装。
-
-完成后重启助手或重新打开会话，检查它能否识别 `opennews` 和 `opentwitter`。它们是两个 skill，上游仓库名称中的 `mcp` 不代表你已经另外启动了两个 MCP 服务进程。本文采用 skills 加本地阅读器的方式，不额外部署 MCP Server。[安装器说明](https://skills.sh/docs/cli)介绍了范围与目标助手选项。
-
-skills 提供调用 API 的操作说明，数据仍需要联网获取。安装 skill 不会自动创建定时任务，也不会自动把 Token 配到所有 AI 助手中。
-
-还没注册的读者，可以从 [NewsLiquid 注册入口](https://app.newsliquid.com?code=PC9PTKVS)完成注册，在 MCP 页面获取凭证后继续。
+原教程建议的 `npx skills add 6551Team/...` 会安装以 curl 调用 API 的 skill，要求把 `OPENNEWS_TOKEN` 暴露给助手的 shell 环境，任何由模型生成的命令都能读取它；`npx skills` 本身也未锁定版本。安全审计（`docs/SECURITY-AUDIT.zh-CN.md`，S6）建议改用 MCP 通道：Token 只注入 MCP 子进程，并用工具白名单限制可调用的接口。Hermes Agent 的接入方式见后续的 Hermes 集成文档。
 
 ## 四、下载阅读器代码
 
@@ -92,12 +69,6 @@ python3 configure.py
 如果已有配置，工具会先询问是否覆盖。以后更换 Token，也运行同一条命令，保存后重启阅读器。
 
 `.env.local` 已被 `.gitignore` 排除，`.env.example` 只有空示例。不要把真实 Token 填进示例文件。程序只读取明确指定的配置或本项目本地配置，不会搜索其他项目的密钥。
-
-要让 AI 助手同时使用 skills，可以给它下面这段指令。
-
-> 请使用 opennews 和 opentwitter skills，凭证只从当前项目的 .env.local 读取，变量名是 OPENNEWS_TOKEN。不要在回答、日志或命令输出里显示值，只向 ai.6551.io 的对应 API 发送认证请求。先查询 NEARProtocol 的公开资料，再检索 NEAR 近期新闻，保留来源链接。不要发布推文或操作交易。
-
-助手若只支持环境变量而不能读取文件，应使用它支持的本地密钥配置方式设置 `OPENNEWS_TOKEN`。阅读器的 `.env.local` 不会自动注入另一个已运行的助手进程。一次查询成功，只证明对应接口可用，不能证明定时采集已经运行。
 
 ## 六、启动本地阅读器
 
@@ -166,7 +137,7 @@ macOS 和 Linux 也可使用 `sh start.sh`。看到 `Signal live reader ready` �
 
 | 现象 | 先检查什么 |
 | --- | --- |
-| 找不到 Python 或 npx | 安装对应运行环境后重新打开终端 |
+| 找不到 Python | 安装 Python 后重新打开终端 |
 | 找不到 run.py | 当前目录是否为项目根目录 |
 | 端口已占用 | 是否已启动过一个阅读器，保留一个实例即可 |
 | 未配置凭证 | 运行 configure.py，确认配置存在，再重启 |
@@ -211,7 +182,7 @@ node --test test_*.cjs
 
 ## 阅读体验更新（本地待发布）
 
-首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板、昨日摘要和可选 ntfy 推送已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。推送默认关闭，需用户自行配置接收端；当前摘要为原文要点，未启用 LLM 生成。
+首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板和昨日摘要已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。本地阅读器不再直接推送（ntfy 已移除），推送改由 Hermes 网关负责；当前摘要为原文要点，未启用 LLM 生成。
 
 ## 图表与个人情报工作台更新
 

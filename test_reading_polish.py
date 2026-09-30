@@ -1,31 +1,8 @@
 import unittest
-from unittest.mock import patch
-import features, reading_text, alerts
+import reading_text, alerts
 
 
 class ReadingPolishTests(unittest.TestCase):
-    def test_failure_status_and_retry_without_exposing_exception(self):
-        with (
-            patch.dict(features.TRANSLATIONS, {}, clear=True),
-            patch.dict(features.RETRY, {}, clear=True),
-            patch.dict(features.TRANSLATION_ERRORS, {}, clear=True),
-            patch.dict(features.TRANSLATION_ATTEMPTS, {}, clear=True),
-            patch.object(features, "TRANSLATION_PAUSE_UNTIL", 0),
-        ):
-            text = "A new announcement about protocol availability"
-
-            def fail(url):
-                raise ValueError("private diagnostic not for UI")
-
-            features.translate_one(text, fail)
-            status = features.text_translation_status(text)
-            self.assertEqual(status["status"], "failed")
-            self.assertIsNotNone(status["retryAt"])
-            self.assertEqual(status["attempts"], 1)
-            self.assertNotIn("private", str(status))
-            features.translate_one(text, fail)
-            self.assertEqual(features.text_translation_status(text)["attempts"], 1)
-
     def test_terms_and_original_are_separate(self):
         text = "Open interest rises as funding rate increases"
         self.assertEqual(

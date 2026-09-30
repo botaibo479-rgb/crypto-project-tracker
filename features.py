@@ -1,4 +1,4 @@
-import json, re, time, hashlib, threading, urllib.parse, datetime as dt
+import json, re, time, threading, urllib.parse, datetime as dt
 import account_profiles
 import discussion_quality
 import reading_text
@@ -9,28 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parent
 TLOCK = threading.Lock()
-TRANSLATIONS = {}
-RETRY = {}
-TRANSLATION_PAUSE_UNTIL = 0
-TRANSLATION_ERRORS = {}
-TRANSLATION_ATTEMPTS = {}
-TPATH = DATA_DIR / "translations.json"
 APATH = DATA_DIR / "avatars.json"
 try:
     AVATARS = json.loads(APATH.read_text())
 except Exception:
     AVATARS = {}
-if TPATH.exists():
-    try:
-        TRANSLATIONS = json.loads(TPATH.read_text())
-    except Exception:
-        pass
-
-
-def digest(text):
-    return hashlib.sha256(
-        (reading_text.translation_version(text) + text).encode()
-    ).hexdigest()
 
 
 def needs_translation(text):
@@ -39,167 +22,23 @@ def needs_translation(text):
     ) < max(3, len(re.findall("[A-Za-z]", text)) // 3)
 
 
+# Machine translation is intentionally not performed here: source text was sent to
+# an unofficial Google endpoint, exposing the watchlist. The agent translates on
+# demand; readers see the original text.
 def translated(text):
     if not needs_translation(text):
         return reading_text.readable(text)
-    with TLOCK:
-        value = TRANSLATIONS.get(digest(text))
-        if value:
-            value = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", value)
-        if value and "ZXQ" not in value:
-            return value
-        # Reuse legacy text only when every currently protected identifier survives.
-        # This does not assert translation accuracy; it prevents avoidable cache churn.
-        if reading_text.translation_version(text) == "v3:":
-            old = TRANSLATIONS.get(hashlib.sha256(("v2:" + text).encode()).hexdigest())
-            if old:
-                old = reading_text.readable(old)
-                tokens = [
-                    m.group()
-                    for m in reading_text.PROTECTED.finditer(
-                        reading_text.readable(text)
-                    )
-                ]
-                if "ZXQ" not in old and all(
-                    old.casefold().count(t.casefold()) >= tokens.count(t)
-                    for t in set(tokens)
-                ):
-                    return old
-        return None
-
-
-def translate_one(text, request):
-    global TRANSLATION_PAUSE_UNTIL
-    if translated(text) is not None:
-        return
-    key = digest(text)
-    with TLOCK:
-        if TRANSLATION_PAUSE_UNTIL > time.time():
-            return
-        if (
-            key in TRANSLATIONS
-            and "ZXQ"
-            not in re.sub(r"[\u200b\u200c\u200d\ufeff]", "", TRANSLATIONS[key])
-        ) or RETRY.get(key, 0) > time.time():
-            return
-    try:
-        # Public source text only. No API credentials are sent to the translator.
-        parts = []
-        protected = []
-
-        def protect(match):
-            protected.append(match.group())
-            return "ZXQKEEP" + str(len(protected) - 1) + "QXZ"
-
-        source = reading_text.PROTECTED.sub(protect, reading_text.readable(text))
-        source = reading_text.standard_terms(source)
-        for chunk in reading_text.chunks(source):
-            query = urllib.parse.urlencode(
-                {"client": "gtx", "sl": "auto", "tl": "zh-CN", "dt": "t", "q": chunk}
-            )
-            result = json.loads(
-                request("https://translate.googleapis.com/translate_a/single?" + query)
-            )
-            parts.append("".join(item[0] for item in result[0] if item and item[0]))
-        value = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", "".join(parts))
-        for i, original in enumerate(protected):
-            value = re.sub(
-                r"ZXQ\s*(?:KEEP|保留)\s*" + str(i) + r"\s*QXZ",
-                lambda _: original,
-                value,
-                flags=re.I,
-            )
-        if "ZXQ" in value:
-            raise ValueError("unresolved_placeholder")
-        if not value:
-            raise ValueError("empty_translation")
-        with TLOCK:
-            TRANSLATIONS[key] = value
-            RETRY.pop(key, None)
-            TRANSLATION_ERRORS.pop(key, None)
-            TRANSLATION_ATTEMPTS.pop(key, None)
-    except Exception as error:
-        with TLOCK:
-            TRANSLATION_ATTEMPTS[key] = TRANSLATION_ATTEMPTS.get(key, 0) + 1
-            RETRY[key] = time.time() + min(
-                3600, 300 * 2 ** min(TRANSLATION_ATTEMPTS[key] - 1, 4)
-            )
-            TRANSLATION_ERRORS[key] = (
-                "rate_limited" if getattr(error, "code", None) == 429 else "failed"
-            )
-            if getattr(error, "code", None) == 429:
-                try:
-                    delay = max(
-                        300, min(3600, int(error.headers.get("Retry-After", "900")))
-                    )
-                except (ValueError, TypeError, AttributeError):
-                    delay = 900
-                TRANSLATION_PAUSE_UNTIL = time.time() + delay
+    return None
 
 
 def translation_status():
-    with TLOCK:
-        paused = TRANSLATION_PAUSE_UNTIL > time.time()
-        return {
-            "status": "rate_limited" if paused else "available",
-            "retryAt": int(TRANSLATION_PAUSE_UNTIL * 1000) if paused else None,
-        }
+    return {"status": "disabled", "retryAt": None}
 
 
 def text_translation_status(text):
     if translated(text) is not None:
         return {"status": "ready", "retryAt": None}
-    key = digest(text)
-    with TLOCK:
-        retry = max(RETRY.get(key, 0), TRANSLATION_PAUSE_UNTIL)
-        status = (
-            "rate_limited"
-            if TRANSLATION_PAUSE_UNTIL > time.time()
-            else TRANSLATION_ERRORS.get(key, "pending")
-        )
-        return {
-            "status": status,
-            "retryAt": int(retry * 1000) if retry > time.time() else None,
-            "attempts": TRANSLATION_ATTEMPTS.get(key, 0),
-        }
-
-
-def translation_loop(data, lock, request):
-    while True:
-        with lock:
-            events = sorted(
-                data["events"] + data.get("intelligenceEvents", []),
-                key=lambda e: e.get("publishedAt") or 0,
-                reverse=True,
-            )
-            texts = [
-                e.get(field, "") for e in events for field in ["title", "summary"]
-            ] + data.get("calendarTexts", [])
-            for social in data.get("social", {}).values():
-                texts.extend(
-                    a.get("text", "")
-                    for a in social.get("discussants", []) + social.get("posts", [])
-                )
-        with TLOCK:
-            retry = dict(RETRY)
-        pending = list(
-            dict.fromkeys(
-                t
-                for t in texts
-                if t
-                and needs_translation(t)
-                and translated(t) is None
-                and retry.get(digest(t), 0) <= time.time()
-            )
-        )[:40]
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            list(ex.map(lambda t: translate_one(t, request), pending))
-        with TLOCK:
-            TPATH.parent.mkdir(exist_ok=True)
-            tmp = TPATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps(TRANSLATIONS, ensure_ascii=False))
-            tmp.replace(TPATH)
-        time.sleep(5 if pending else 20)
+    return {"status": "disabled", "retryAt": None, "attempts": 0}
 
 
 def localize(e):

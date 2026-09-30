@@ -17,20 +17,9 @@ python3 run.py
 
 Windows 使用 `py -3` 替换 `python3`。打开 http://127.0.0.1:4317/ ，终端保持运行，Ctrl+C 停止。未配置 Token 时可检查页面与公开行情，但认证来源不可用。
 
-## 注册与 skills
+## 凭证
 
-[NewsLiquid 注册入口（邀请码 PC9PTKVS）](https://app.newsliquid.com?code=PC9PTKVS) · [MCP 凭证页面](https://app.newsliquid.com/mcp)
-
-初次体验建议先购买最低价付费会员 **Plus，1.90 USDT／月（约 1.9 U）**，用少量项目测试；觉得好用，再按需求升级 **Pro** 或 **Max**。本地版采用定时查询，不要求 Max 的 WSS 权限。套餐能使用多久取决于实际消息消耗，价格与权益以结算页及 [官方会员说明](https://docs.newsliquid.com/plans-and-points) 为准。
-
-以下为可选步骤。希望通过 AI 助手查询数据时，再安装 Node.js/npx，并在支持的助手环境安装两个 skills；仅使用阅读器可跳过。
-
-```bash
-npx skills add 6551Team/opennews-mcp
-npx skills add 6551Team/opentwitter-mcp
-```
-
-两项服务使用 `OPENNEWS_TOKEN`。阅读器直接调用 API，skills 供 AI 助手调用。额度和权限以服务商当前页面为准。
+在浏览器手动输入官方凭证页 `https://app.newsliquid.com/mcp` 获取自己的 Token（不使用带邀请码的推广链接）。阅读器直接调用 API，只向 `ai.6551.io` 发送该 Token；带 Token 的请求不跟随重定向。不建议安装以 curl 调用 API 的 opennews / opentwitter skills（会把 Token 暴露给助手的 shell），安全审计见 [docs/SECURITY-AUDIT.zh-CN.md](docs/SECURITY-AUDIT.zh-CN.md)。
 
 ## 功能与范围
 
@@ -52,7 +41,7 @@ npx skills add 6551Team/opentwitter-mcp
 
 ## 数据与安全
 
-只将 Token 配到 `.env.local` 或环境变量，不提交到 Git。后台仅向 ai.6551.io 发送该 Token。公开新闻翻译调用 Google 翻译端点，搜索使用 CoinGecko，行情使用 Binance，团队资料读取 RootData；头像和字体可能产生浏览器外部请求。
+只将 Token 配到 `.env.local` 或环境变量，不提交到 Git。后台仅向 ai.6551.io 发送该 Token，且不跟随重定向。不再调用 Google 翻译端点（英文原文直接显示）；搜索使用 CoinGecko，行情使用 Binance，团队资料读取 RootData（仅同站重定向）；头像和字体可能产生浏览器外部请求。
 
 默认监听 127.0.0.1，请勿直接暴露到公网。源码不含用户凭证、data/ 或原开发环境配置。备份、限制与故障排查见教程。
 
@@ -82,7 +71,7 @@ node --test test_*.cjs
 
 ## 阅读体验更新（本地待发布）
 
-首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板、昨日摘要和可选 ntfy 推送已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。推送默认关闭，需用户自行配置接收端；当前摘要为原文要点，未启用 LLM 生成。
+首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板和昨日摘要已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。本地阅读器不再直接推送（ntfy 已移除），推送改由 Hermes 网关负责；当前摘要为原文要点，未启用 LLM 生成。
 
 ## 图表与个人情报工作台更新
 

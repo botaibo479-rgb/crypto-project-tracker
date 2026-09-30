@@ -1,4 +1,4 @@
-import unittest, json, urllib.parse, time
+import unittest, json, time
 import features
 
 
@@ -70,19 +70,6 @@ class FeaturesTests(unittest.TestCase):
                 features.confirm_project(
                     {"coinId": coin, "name": "Test", "symbol": "T"}
                 )
-
-    def test_translation_preserves_identifiers(self):
-        text = "SOON partners with NEAR at @NEARProtocol https://near.org/test"
-
-        def request(url):
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["q"][0]
-            self.assertNotIn("SOON", q)
-            return json.dumps([[[q.replace("partners with", "合作"), ""]]])
-
-        features.TRANSLATIONS.pop(features.digest(text), None)
-        features.translate_one(text, request)
-        self.assertIn("SOON 合作 NEAR", features.translated(text))
-        self.assertIn("https://near.org/test", features.translated(text))
 
     def test_discovery_rejects_stale_and_unrelated(self):
         now = int(time.time() * 1000)
