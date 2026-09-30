@@ -1,4 +1,4 @@
-import unittest, tempfile, time, json
+import unittest, tempfile, time
 from pathlib import Path
 from unittest.mock import patch
 from crypto_tracker.core import alerts, charts

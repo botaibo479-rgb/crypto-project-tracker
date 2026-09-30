@@ -23,6 +23,7 @@ MAX_BYTES = 65536
 FILE_MODE = 0o660
 KINDS = frozenset(
     {
+        "search_projects",
         "prepare_project",
         "add_project",
         "remove_project",

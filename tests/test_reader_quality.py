@@ -1,7 +1,6 @@
 import unittest
 from crypto_tracker.core.news_quality import annotate, relevant
 from crypto_tracker.core.reader_quality import presentation
-from crypto_tracker.core.event_clusters import cluster
 from crypto_tracker.store.projects import match_fields
 from crypto_tracker.core.alerts import evaluate, validate
 

@@ -5,11 +5,15 @@ description = "Crypto project intelligence collector and MCP tools for Hermes Ag
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    # Hermes Agent ships mcp 2.x; pin exactly and install with `uv sync --frozen`.
+    "mcp==2.2.0",
+]
 
 [project.scripts]
 crypto-tracker = "crypto_tracker.cli:main"
 crypto-tracker-collector = "crypto_tracker.collector.__main__:main"
+crypto-tracker-mcp = "crypto_tracker.mcp_server.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

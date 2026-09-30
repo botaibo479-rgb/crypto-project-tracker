@@ -95,6 +95,7 @@ class Collector:
         self.charts = binance.Charts(request)
         self.refreshed = {}
         self.handlers = {
+            "search_projects": self.cmd_search_projects,
             "prepare_project": self.cmd_prepare_project,
             "add_project": self.cmd_add_project,
             "remove_project": self.cmd_remove_project,
@@ -435,6 +436,11 @@ class Collector:
         if not project:
             raise ValueError("项目不存在")
         return project
+
+    def cmd_search_projects(self, payload):
+        return project_store.search_projects(
+            str(payload.get("query", "")), self.request
+        )
 
     def cmd_prepare_project(self, payload):
         return project_store.prepare_project(payload, self.request)
