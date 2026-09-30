@@ -27,6 +27,7 @@ function compactAccounts(p){
   const accounts=groupIndex===0?(p.team||[]):(liveData?.social?.[p.id]?.discussants||[]);
   group.querySelectorAll('.account-card').forEach((card,i)=>{
    const a=accounts[i];if(!a)return;
+   if(groupIndex===1){const history=document.createElement('button');history.className='text-button';history.dataset.opHistory=a.account.toLowerCase();history.textContent='查看观点历史';card.append(history)}
    if(a.profile){const note=document.createElement('small');note.textContent='账号资料采集：'+formatTime(a.profile.checkedAt)+(a.profile.status==='error'?' · 查询失败，保留旧资料':'')+'。不代表任职核验。';card.append(note);const last=a.profile.history?.at(-1);if(last){const changes=document.createElement('small');changes.textContent='最近变化：'+last.fields.join('、')+' · '+formatTime(last.at);card.append(changes)}}
    const item=document.createElement('div');item.className='avatar-item';
    const button=document.createElement('button');button.className='account-avatar';button.type='button';

@@ -16,6 +16,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from news_quality import relevant, QUERIES, curate
 import features
+import viewpoints
 import team_news
 import alerts
 import charts
@@ -37,6 +38,7 @@ ALERT_STORE=alerts.Store(config.DATA_DIR/'alerts.json')
 PREFERENCES=preferences.Store(config.DATA_DIR/'preferences.json')
 PUBLIC_SOURCES=public_sources.Store(config.DATA_DIR/'public-sources.json')
 PROJECT_CALENDAR=project_calendar.Store(config.DATA_DIR/'project-calendar.json')
+VIEWPOINTS=viewpoints.Store(config.DATA_DIR/'viewpoints.json')
 CHART_CACHE={}
 CHART_LOCK=threading.Lock()
 PROJECTS=[
@@ -276,6 +278,7 @@ def loop():
       with LOCK:DATA['markets'][pid]=m
      except Exception as e:collector_status('market',lastError=error_label(e),lastErrorAt=now())
    with LOCK:DATA['updatedAt']=now();DATA['refreshing']=False;persist()
+   VIEWPOINTS.sample(DATA['markets'],now())
    collector_status('market',lastCompletedAt=now())
   except Exception as e:collector_status('market',lastError=error_label(e),lastErrorAt=now())
   delay=max(1,60-(time.time()-started));collector_status('market',running=False,nextRunAt=now()+int(delay*1000))
@@ -401,14 +404,16 @@ def rootdata_loop():
   time.sleep(3600)
 
 def collect_social_project(project):
- try:result=features.discover(project,request,timestamp)
+ try:result=features.discover(project,request,timestamp,VIEWPOINTS.watches(project['id']))
  except Exception as e:result={'status':'error','message':error_label(e),'discussants':[]}
+ VIEWPOINTS.ingest(project,result,now())
  with LOCK:DATA['social'][project['id']]=social_result(DATA['social'].get(project['id'],{}),result,now())
 
 def social_loop():
  while True:
   with LOCK:last=DATA['collectors'].get('social',{}).get('lastCompletedAt',0)
   remaining=1800-(now()-last)/1000
+  if any(not VIEWPOINTS.snapshot(p['id'],now())['coverage'] for p in PROJECTS):remaining=0
   if remaining>0:collector_status('social',running=False,nextRunAt=last+1800000);time.sleep(min(60,remaining));continue
   collector_status('social',running=True,lastStartedAt=now(),intervalSeconds=1800)
   try:
@@ -463,6 +468,11 @@ class Handler(SimpleHTTPRequestHandler):
    with LOCK:p=next((dict(p) for p in PROJECTS if p['id']==pid),None)
    if not p:self.json_response({'error':'项目不存在'},404);return
    self.json_response({'sources':source_snapshot(pid),'calendar':PROJECT_CALENDAR.snapshot(),'calendarSlug':p.get('calendarSlug') or p.get('coinId',''),'calendarProtocolId':p.get('calendarProtocolId','')});return
+  if self.path.startswith('/api/viewpoints?'):
+   pid=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('project',[''])[0]
+   result=VIEWPOINTS.snapshot(pid,now())
+   for row in result['posts']:row['textZh']=features.translated(row['text'])
+   self.json_response(result);return
   if self.path=='/api/preferences':
    self.json_response({'values':PREFERENCES.snapshot()});return
   if self.path=='/api/digest':
@@ -484,7 +494,7 @@ class Handler(SimpleHTTPRequestHandler):
   if self.path=='/api/live':
    with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in reader_quality.presentation(cluster(curate(DATA['events'],projects=PROJECTS)))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'projectCalendar':PROJECT_CALENDAR.snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
-  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js','/reader.js','/pro-chart.js','/workspace.js','/lightweight-charts.js','/lightweight-charts.LICENSE','/lightweight-charts.NOTICE']:
+  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js','/reader.js','/pro-chart.js','/workspace.js','/viewpoints.js','/lightweight-charts.js','/lightweight-charts.LICENSE','/lightweight-charts.NOTICE']:
    self.send_error(404);return
   super().do_GET()
  def json_response(self,value,status=200):
@@ -497,6 +507,17 @@ class Handler(SimpleHTTPRequestHandler):
    length=int(self.headers.get('Content-Length','0'))
    if not 0<length<=(250000 if self.path=='/api/preferences' else 10000):raise ValueError('请求大小无效')
    payload=json.loads(self.rfile.read(length))
+   if self.path=='/api/viewpoints':
+    action=payload.get('action');pid=payload.get('projectId')
+    if action=='track':
+     with LOCK:
+      event=next((e for e in cluster(curate(DATA['events'],projects=PROJECTS)) if str(e['id'])==str(payload.get('eventId')) and pid in e.get('projectIds',[e['p']])),None)
+      market=dict(DATA['markets'].get(pid,{}))
+     if not event:raise ValueError('原始事件不存在或项目不匹配')
+     VIEWPOINTS.track(event,pid,market,now())
+    elif action=='untrack':VIEWPOINTS.remove_track(payload.get('id'))
+    else:VIEWPOINTS.configure(payload,[p['id'] for p in PROJECTS])
+    self.json_response({'ok':True});return
    if self.path.startswith('/api/extensions/'):
     with LOCK:p=next((dict(p) for p in PROJECTS if p['id']==payload.get('projectId')),None)
     if not p:raise ValueError('项目不存在')

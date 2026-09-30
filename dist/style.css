@@ -59,3 +59,23 @@
 #personal-views{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid #e3e9e3;font-size:12px}#personal-views select{padding:7px;border:1px solid #d8e3dc;border-radius:6px;background:#fffefa;color:#284a3c}#personal-views small{color:#728478}.feedback-options{display:grid;gap:10px}.feedback-options small{margin-bottom:10px;color:#6c7c74}.calendar-item{padding:12px 0;border-top:1px solid #e4ebe5}.calendar-item p{margin:6px 0}.calendar-item small{font-size:11px;color:#728478}.calendar-item a{font-size:12px}.source-row small{overflow-wrap:anywhere}.source-subscription{border-left-color:#68a09b}.form-error{color:#ac504c}.field select[multiple]{min-height:92px}
 
 .portfolio-calendar{padding:14px;border:1px solid #dee8df;border-radius:8px;margin:14px 0;background:#f5f8f2}.portfolio-calendar summary{cursor:pointer;font-size:13px;font-weight:600}
+
+/* Source-backed viewpoints */
+#opinion-panel{margin-top:18px}#opinion-panel>details{margin-top:18px;border-top:1px solid var(--line,#dce6df);padding-top:14px}#opinion-panel summary{cursor:pointer}.attention-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 0}.attention-stats strong{display:block;font-size:24px}.attention-stats small{display:block;color:#73817d}.opinion-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.opinion-columns>div{border:1px solid #dce6df;border-radius:12px;padding:14px;min-width:0}.opinion-columns h4{margin:0 0 12px}.opinion-columns h4 span{color:#829088;font-weight:400}.opinion-post{padding:12px 0;border-bottom:1px solid #e5eae6;overflow-wrap:anywhere}.opinion-post p{white-space:pre-wrap;font-size:13px;line-height:1.7}.opinion-post small{color:#718078;font-size:11px}.opinion-post a{font-size:12px;color:#235e4b}.opinion-accounts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}@media(max-width:900px){.opinion-columns{grid-template-columns:1fr}.attention-stats{grid-template-columns:repeat(2,1fr)}}
+
+.opinion-columns{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));align-items:start}.opinion-counts{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.opinion-counts span{font-size:12px;padding:5px 10px;border-radius:20px;background:#edf3ef;color:#456451}.opinion-post>p:first-of-type{white-space:normal}.opinion-post>p{margin:8px 0}
+
+/* Collapsed supporting modules leave the event feed within easy reach. */
+#project-overview .collapsible-module{padding:16px 22px;margin-top:12px;margin-bottom:12px}
+.collapsible-module>.project-section-title{margin:0;gap:12px;flex-wrap:wrap}
+.collapsible-module>.project-section-title>h3{flex:1;min-width:200px;margin:0}
+.module-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;padding:4px 0;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;text-align:left;cursor:pointer}
+.module-toggle-label{font-size:12px;font-weight:400;color:#687d73;white-space:nowrap}
+.module-toggle-label::before{content:'▾';margin-right:6px}
+.module-toggle[aria-expanded=false] .module-toggle-label::before{content:'▸'}
+.module-toggle:focus-visible{outline:2px solid #286b55;outline-offset:5px;border-radius:3px}
+.module-body{margin-top:16px}.module-body[hidden]{display:none!important}
+.module-collapsed>.project-section-title>:not(h3){display:none!important}
+#opinion-panel.collapsible-module .module-body>details{margin-top:16px;padding-top:12px;border-top:1px solid #e5eae6}
+@media(max-width:600px){#project-overview .collapsible-module{padding:14px 16px}.collapsible-module>.project-section-title>h3{min-width:0;width:100%}}
+.collapsible-module .module-toggle>span:first-child{font-size:15px;font-weight:600;color:#293d35}
