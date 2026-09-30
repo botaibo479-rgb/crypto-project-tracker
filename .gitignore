@@ -1,11 +1,20 @@
+# Local state and credentials: never commit.
 data/
+store/
+spool/
+*.state.json
+.env*
+*.cred
+credstore*/
+*.pem
+*.key
+
 __pycache__/
 *.pyc
-.env*
-!.env.example
+.venv/
+.ruff_cache/
 *.log
 .DS_Store
-.venv/
 .agents/
 .claude/
 .codex/

@@ -1,93 +1,82 @@
-# Signal · 个人加密项目信息追踪工具
+# crypto-project-tracker · Hermes Agent 版
 
-**开源 Beta · 本地个人工具**
+个人加密项目信息追踪工具，面向 [Hermes Agent](https://github.com/nousresearch/hermes-agent)。本项目由 [jamesxxx-ai/crypto-project-tracker](https://github.com/jamesxxx-ai/crypto-project-tracker)（审计基线 `666e3ce`）改造而来：
 
-本地运行的中文新闻阅读器，聚合项目官方资讯、团队 X、近期讨论者和市场信号。默认 SOON、NEAR、PHA、NIL 四个示例。
+- 保留原项目的信息追踪能力：OpenNews / OpenTwitter、KOL、项目团队、行情、提醒、事件聚合。
+- 去掉 Web 界面与公网部署，改为「独立采集器 + MCP 工具 + Skill + Cron」。
+- 修复了安全审计中发现的问题，详见 [docs/SECURITY-AUDIT.zh-CN.md](docs/SECURITY-AUDIT.zh-CN.md)。
 
-**[完整教程 · 手把手教你如何搭建个人的加密项目信息追踪工具](TUTORIAL.zh-CN.md)**
+## 架构
+
+```
+Hermes Agent（CLI / Telegram 等网关）
+ ├─ Skill  crypto-project-tracker          hermes/skills/
+ ├─ MCP    crypto_tracker（stdio）          python -m crypto_tracker.mcp_server
+ │    只读 store；写操作投递到 spool；不持有 Token，不联网
+ └─ Cron   tracker-alerts.py（no-agent，每 5 分钟推送新提醒）+ 每日简报（agent + skill）
+
+采集器 crypto-tracker-collector（systemd，独立用户，不监听端口）
+ 持有 OPENNEWS_TOKEN（systemd 加密凭证），是 store 的唯一写入者
+ 采集频率：行情 60s · 新闻 / 社交 30min · 情报 5min · 提醒评估 20s · RootData 24h
+```
+
+目录说明：
+
+| 目录 | 内容 |
+|---|---|
+| `src/crypto_tracker/` | 采集器、MCP 服务、核心规则 |
+| `hermes/` | Skill、配置片段、提醒脚本 |
+| `deploy/systemd/` | 加固的服务单元、安装脚本 |
+| `tests/` | 单元测试与端到端测试 |
 
 ## 快速开始
 
-只运行阅读器，需要 Python 3.12+ 和自己的 API Token，无需 pip 依赖、Node.js、skills 或 AI 助手，也不需要云服务器。下载解压后，在项目目录运行。
+VPS 部署步骤见 [docs/HERMES-SETUP.zh-CN.md](docs/HERMES-SETUP.zh-CN.md)。本地开发：
 
 ```bash
-python3 configure.py
-python3 run.py
+uv sync --frozen                                   # 唯一第三方依赖：mcp==2.2.0（锁定哈希）
+uv run python -m unittest discover -s tests -t .   # 全部测试
+OPENNEWS_TOKEN_FILE=~/.config/crypto-tracker/token TRACKER_HOME=/tmp/ct \
+  uv run python -m crypto_tracker.collector --once # 采集一轮（Token 文件须为 0600）
+TRACKER_HOME=/tmp/ct uv run python -m crypto_tracker.mcp_server   # stdio MCP
 ```
 
-Windows 使用 `py -3` 替换 `python3`。打开 http://127.0.0.1:4317/ ，终端保持运行，Ctrl+C 停止。未配置 Token 时可检查页面与公开行情，但认证来源不可用。
+## 能力
 
-## 凭证
+| 能力 | MCP 工具 | 数据来源 |
+|---|---|---|
+| 项目概览 | `tracker_project_brief` | 汇总下列各项 |
+| 新闻 / 官方 X / 官网 / RSS | `tracker_events`、`tracker_event_detail` | OpenNews、OpenTwitter、官网、用户确认的 RSS |
+| 团队 | `tracker_team` | RootData 公开团队区与人工证据；只收录明确提及项目的推文 |
+| KOL / 近期讨论者 | `tracker_kol` | 近 7 天提及官方账号、粉丝 ≥ 2 万 |
+| 观点日志 | `tracker_viewpoints` | 按明确第一人称措辞归类，未推断真实仓位 |
+| 行情 | `tracker_market` | Binance USDⓈ-M 永续公共接口：4h 收盘 EMA200/360、1h OI |
+| 信号 | `tracker_signals` | OpenNews 的交易所公告、资金费率、大额清算、资金动态、OI |
+| 宏观日历 | `tracker_macro_calendar` | 供应方日历（可能不可用） |
+| 提醒 | `tracker_alerts`、`tracker_upsert_alert_rule` | 价格、OI、价位、EMA、组合、新闻、公告、费率、清算、资金动态 |
+| 摘要 | `tracker_digest` | 昨日原文要点，每个项目最多 3 条 |
 
-在浏览器手动输入官方凭证页 `https://app.newsliquid.com/mcp` 获取自己的 Token（不使用带邀请码的推广链接）。阅读器直接调用 API，只向 `ai.6551.io` 发送该 Token；带 Token 的请求不跟随重定向。不建议安装以 curl 调用 API 的 opennews / opentwitter skills（会把 Token 暴露给助手的 shell），安全审计见 [docs/SECURITY-AUDIT.zh-CN.md](docs/SECURITY-AUDIT.zh-CN.md)。
+所有写操作都需要 Hermes 审批，由采集器用原有校验逻辑执行。完整工具说明见 [hermes/skills/crypto-project-tracker/references/tools.md](hermes/skills/crypto-project-tracker/references/tools.md)。
 
-## 功能与范围
+## 数据边界（沿用原项目的说明）
 
-- 自定义项目、Logo、分组、排序、未读和收藏。
-- 中文优先、原文切换、官方/团队来源区分、规则式事件合并。
-- RootData 公开团队区及人物页关联，讨论者至少 20,000 粉丝。
-- K 线、EMA 200/360、新闻标记，价格/OI/价位/均线站内提醒；突破周期可选 1 小时、4 小时或日线，收盘确认。
-- 按项目汇总未读更新、同一事件时间线及后续进展，支持原文核对。
-- 中文译文缓存、常见术语与失败重试；触发记录保存规则和来源，可回看新闻或对应周期图表。
-- 失败保留旧结果并显示时间，数据保存于本地 data/。
+- **覆盖范围。** 数据来自抽样检索，不代表全网覆盖。每轮信号查询最多取 100 条，达到上限时会标注；同一事件的归并规则偏保守，也不做独立事实核验。
+- **公告分类。** 交易所公告区分上币、下架、充提、合约调整和其他。普通评论不会被归为上币，「其他公告」不触发专门的公告提醒。
+- **资金费率。** 保留原文单位、交易所和观察周期，不换算年化，也不承诺套利收益。资金费率提醒依据供应方的事件，不是自定义的费率数值扫描。
+- **大额清算。** 金额单位为 USD，只使用原文明确标注的清算金额，并且不会把可能重叠的金额相加。阈值为正数时，未知金额的记录不会触发。
+- **资金动态与 OI。** 这些只是事件线索，不能证明钱包归属，也不等于完整的持仓监控。消息与行情时间接近不代表因果关系。
+- **提醒规则。** 只对规则创建之后的新事件生效，采用收盘确认，受冷却时间和去重限制。提醒是规则命中，不是投资建议。
+- **身份标注。** 团队身份标注为「非实时任职核验」，KOL 身份未经核实。
+- **翻译与交易。** 不做机器翻译，由 Agent 按需翻译；不执行任何交易，也不接触交易所私钥。
 
-本地单人使用，无交易执行。翻译可能限流或错误；团队发现依赖公开页及手动关联；新闻覆盖和事件归并非完整或独立事实核验。浏览器通知需主动授权并保持页面可运行，不是离线推送。Windows 与操作系统通知尚未完成真机验收。
+## 安全要点
 
-## Beta 使用须知
+- **不监听端口。** 采集器和 MCP 服务都不开任何端口，VPS 只需开放 SSH。
+- **Token 隔离。** Token 只在采集器进程中：systemd `LoadCredentialEncrypted` 负责解密；带 Token 的请求禁止重定向，并有主机白名单。
+- **最小权限。** Hermes 用户只能读 store、向 spool 投递命令，读不到凭证。
+- **防提示注入。** 第三方文本会被清理和截断，并标记 `untrusted_content`；Skill 规定这类内容只能当数据看待。
+- **依赖锁定。** 依赖锁定并校验哈希（`uv.lock`、`deploy/requirements.lock.txt`）。CI 运行测试、ruff、gitleaks 和隐藏字符检查。
 
-适合在自己的电脑上追踪少量关注项目。电脑联网且后台程序运行时才会持续采集；睡眠、断网或退出程序会中断更新。源码免费开源，第三方 API 可能收费或限制额度。
+## 许可证
 
-当前已经完成开发环境联调和自动测试，尚未完成全新电脑安装流程及 Windows 真机验收。欢迎试用并在 Issues 提交操作系统、复现步骤和脱敏截图，帮助完善安装体验。
-
-## 数据与安全
-
-只将 Token 配到 `.env.local` 或环境变量，不提交到 Git。后台仅向 ai.6551.io 发送该 Token，且不跟随重定向。不再调用 Google 翻译端点（英文原文直接显示）；搜索使用 CoinGecko，行情使用 Binance，团队资料读取 RootData（仅同站重定向）；头像和字体可能产生浏览器外部请求。
-
-默认监听 127.0.0.1，请勿直接暴露到公网。源码不含用户凭证、data/ 或原开发环境配置。备份、限制与故障排查见教程。
-
-## 验证与贡献
-
-```bash
-python3 -m unittest discover -q
-node --test test_*.cjs
-```
-
-提交问题时移除日志中的 Token、个人路径与阅读数据。欢迎提交复现步骤和改进测试。源码采用 [MIT](LICENSE)，第三方数据与商标按各自权限使用。上游 skills 未打包，分别从原作者仓库安装。
-
-## 新增的 OpenNews 项目信号
-
-- **交易所公告**：区分上币、下架、充提、合约调整及其他公告。普通交易所评论不会直接归为上币。
-- **资金费率**：收录资金费率与跨所费率差异事件；保留原文单位、交易所和观察周期，不直接换算年化或承诺套利收益。
-- **大额清算**：同项目、同来源、同一 15 分钟时间桶折叠展示，详情保留每条记录；不会将可能重叠的清算金额相加。
-- **资金动态与短时 OI**：聚合供应方机构/大户相关报道、smart_money 和短时 OI 异动。属于事件线索，并非钱包归属证明或完整持仓监控。
-- **消息与行情一起看**：详情展示同项目、消息前后各一小时已采集的异动，支持跳转 K 线；时间接近不代表因果关系。
-- **宏观日历（接口待恢复验证）**：首页折叠展示未来约两周日程。2026-09-29 实测供应方接口超时/HTTP 400，尚未验证成功返回日程；页面显示不可用并保留缓存，不将失败显示为空日历。
-
-项目页的「资金与市场异动」可按类别查看，阅读区新增事件分类。译文沿用本地翻译缓存，未完成时明确显示原文。没有来源链接的事件保留供应方编号，不生成虚假链接。
-
-在「新建提醒」中选择交易所公告、资金费率、大额清算或资金动态。提醒默认不开启，由用户自行创建；仅对创建后、最近一小时的新事件检查，去重与冷却时间继续生效。资金费率提醒依据供应方事件，不是自定义费率数值扫描。清算阈值单位 USD，0 表示不限制；正数阈值只匹配明确给出清算金额的记录，未知金额不会触发。公告中的「其他公告」不触发专门公告提醒。
-
-后台每轮共享 3 次信号查询，轮询间隔 5 分钟；每个查询取首批最多 100 条，覆盖多个项目，达到上限会提示，不能保证完整覆盖。日历每小时至多尝试一次。信号最多保留最近 7 天、1500 条。新增查询会消耗服务商额度；少量项目也可能在热门时段被截断。来源失败保留缓存和最近成功时间，不代表持续实时成功。
-
-## 阅读体验更新（本地待发布）
-
-首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板和昨日摘要已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。本地阅读器不再直接推送（ntfy 已移除），推送改由 Hermes 网关负责；当前摘要为原文要点，未启用 LLM 生成。
-
-## 图表与个人情报工作台更新
-
-专业 K 线、成交量/OI 副图、免费 RSS 订阅与可保存的个人筛选视图已加入。详细操作与数据边界见 [更新说明](WORKSPACE-UPDATES.zh-CN.md)。
-
-无需构建或安装 Python 第三方包；前端包含随项目打包的 Lightweight Charts 5.2.1 及其许可证。DefiLlama 融资 API 需自己的 API 权限和 `DEFILLAMA_API_KEY`；不配置时仍可录入带来源链接的融资历史。Telegram RSS 转换可选配置 `SIGNAL_RSSHUB_URL`。
-
-
-### 观点与关注度（本地研究日志）
-
-项目页新增「观点与关注度」：保留近 7 天的讨论原文、按账号浏览历史，并对比每位作者最新一条表述。自动归类使用保守规则 `explicit-wording-v1`，仅识别直接针对代币或官方账号的第一人称看多/看空表达；引用、条件句、期权和对冲等内容保持「未明确」，不推断真实仓位。原帖链接和采集时间保留，中文沿用现有翻译缓存，翻译未就绪时显示原文。
-
-- 关注度仅统计已采集样本。默认讨论者仍需 20k 粉丝，每项目搜索最多 40 条。显示 24h 独立作者、原帖数和最高作者占比，不发布全网热度增长率。跨日新增作者须有连续两日、未触顶且无失败的采集记录；否则显示积累中。
-- 自选 X 账号不受粉丝门槛限制，支持多个项目和私人备注。每个账号与关联项目组合增加一次半小时搜索，仅检索提及该项目官方账号的内容，仍会遗漏只写简称的帖子。最多 20 个账号，不会在 X 上实际关注账号。
-- 观点变化默认关闭，在项目页开启后仅记录站内线索，保留同一作者 7 天内前后原文。首次回填和重复帖子不触发；尚未接入外部推送，不保证识别所有语义反转。
-- 资讯卡片「跟踪后续」从点击时的新鲜 Binance 行情开始，采集 1h、24h、7d 后价格变化。采样容差 3 分钟，停机错过窗口不会使用后来行情冒充。不是发帖价、成交收益或因果分析；另列跟踪后的项目动态供人工核对。
-- 日志保存在忽略提交的 `data/viewpoints.json`，最多每项目 1,500 条 / 30 天记录，页面最多展示近 7 天的最新 200 条。账号备注不会发送给数据供应方。
-
-项目资料与订阅、资金与市场异动、团队成员 X 账号、近期讨论者和观点与关注度默认折叠。点击标题可独立展开；状态按项目保存在当前浏览器，刷新后保留，不影响后台采集。
+MIT。第三方数据、商标和 API 权限按各服务方条款使用。回到原 Web 阅读器：`git checkout 666e3ce`。

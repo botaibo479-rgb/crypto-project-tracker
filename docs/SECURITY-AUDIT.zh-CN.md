@@ -72,3 +72,26 @@
 | 3 | 重构为 `crypto_tracker` 包和独立采集器：S10、S11，凭证加载与脱敏 |
 | 4 | MCP 服务：S5 |
 | 5–7 | Hermes Skill 与 Cron；删除 Web 和公网部署（S4）；systemd 加固部署；CI 与 secret 扫描 |
+
+## 整改状态
+
+| # | 状态 | 实现与验证 |
+|---|---|---|
+| S1 | 已修复 | `net/http.py`：带 Token 的请求禁止重定向，只允许 https，主机白名单只有 ai.6551.io。`tests/test_http_security.py` 先复现 urllib 默认会转发 Authorization，再验证新客户端拒绝重定向 |
+| S2 | 已修复 | 公网页面统一走 `net/safe_fetch.py`：固定公网 IP，逐跳校验，只允许同站重定向；另修复了 `fc00::/7` 这类 IPv6 字面量能绕过校验的问题 |
+| S3 | 已修复 | 文档中删除了邀请码链接 |
+| S4 | 已修复 | 删除 Web 服务、Compose 和 Caddy；采集器与 MCP 都不监听端口 |
+| S5 | 已缓解 | `mcp_server/render.py` 清理控制字符、零宽字符和双向覆盖字符，截断文本，丢弃非 https 链接，标注 `untrusted_content`；Skill 中写了注入防护规则；Hermes 配置 `trust: untrusted`，写操作需要审批 |
+| S6 | 已修复 | 不再推荐 curl 型 skill；Token 只保存在采集器的 systemd 加密凭证中 |
+| S7 | 已修复 | 删除 Google 翻译和 ntfy；DoH 改为显式开启（`TRACKER_ALLOW_DOH=1`）；删除 UI，Google Fonts 随之移除 |
+| S8 | 已修复 | 改由 `credentials.py` 读取凭证：systemd 凭证 → 0600 文件 → 环境变量 → `.env.local`，权限过宽时拒绝启动 |
+| S9 | 已修复 | 官网 Atom 改用 `parse_feed` 解析，拒绝 DOCTYPE 与 ENTITY 声明 |
+| S10 | 已修复 | 日志统一写 stderr，并经过脱敏 formatter；有测试验证 MCP 子进程的 stdout 只输出 JSON-RPC |
+| S11 | 保留（隔离） | 四个项目的官网抓取移入 `sources/official_sites.py`，经 SSRF 安全客户端访问 |
+| S12 | 保留 | 种子数据保留「非实时任职核验」标签 |
+| S13 | 已修复 | 纯格式化提交（AST 未变），之后改为包结构 |
+| S14 | 已修复 | `mcp==2.2.0` 锁定精确版本，uv.lock 与 `deploy/requirements.lock.txt` 带哈希；CI 校验两个锁文件一致 |
+| S15 | 已修复 | store 文件权限 0640、目录 2750；spool 目录 2770；systemd 设 `UMask=0027` |
+| 新增 | 已加入 | `tests/test_hygiene.py` 检查隐藏字符与双向控制字符（Trojan Source）以及疑似凭证；CI 运行 gitleaks |
+
+另外在 VPS 权限模型下做了端到端验证：`install.sh` 建立 release 与用户后，采集器以 `crypto-tracker` 用户运行；MCP 以 `hermes` 用户运行，能够读取 store 并通过 spool 写入规则，但写不了 store，也读不到 credstore。

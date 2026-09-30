@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - name: Install locked dependencies
+        run: uv sync --frozen --python ${{ matrix.python }}
+      - name: Lint
+        run: |
+          uvx ruff@0.15.8 check --select F,E9 src tests hermes
+          uvx ruff@0.15.8 format --check src tests hermes
+      - name: Tests (with MCP)
+        run: uv run python -m unittest discover -s tests -t . -v
+      - name: Core tests without third-party packages
+        run: PYTHONPATH=src uv run --no-project --python ${{ matrix.python }} python -m unittest discover -s tests -t .
+      - name: Lock files are consistent
+        run: |
+          uv lock --check
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt -q -o /tmp/req.txt
+          diff <(grep -v '^#' /tmp/req.txt) <(grep -v '^#' deploy/requirements.lock.txt)
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

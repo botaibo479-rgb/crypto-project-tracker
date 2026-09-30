@@ -1,4 +1,0 @@
-const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const {foldLiquidations,nearbySignals}=vm.runInNewContext(fs.readFileSync('dist/intelligence.js','utf8')+';({foldLiquidations,nearbySignals})');
-test('liquidation folding keeps projects, venues and time buckets separate',()=>{const a={id:1,p:'near',source:'binance',publishedAt:100,providerKind:'liquidation'};const rows=[a,{...a,id:2},{...a,id:3,source:'bybit'},{...a,id:4,p:'pha'},{...a,id:5,publishedAt:900001}];const result=foldLiquidations(rows);assert.equal(result.length,4);assert.equal(result[0].foldedCount,2);assert.equal(rows[0].foldedCount,undefined)});
-test('context only uses same project within one hour, never current snapshot',()=>{const a={id:1,p:'near',publishedAt:10000000};const b={id:2,p:'near',publishedAt:10000001,providerKind:'funding'};assert.equal(nearbySignals([b,{...b,id:3,p:'pha'},{...b,id:4,publishedAt:1}],a).length,1)});

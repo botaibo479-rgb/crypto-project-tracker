@@ -1,0 +1,72 @@
+# Merge into the Hermes user's ~/.hermes/config.yaml (or the profile's config.yaml),
+# then run /reload-mcp. Paths match deploy/systemd/install.sh.
+
+mcp_servers:
+  crypto_tracker:
+    command: "/opt/crypto-tracker/current/.venv/bin/python"
+    args: ["-m", "crypto_tracker.mcp_server"]
+    # Hermes passes only this env plus a safe baseline to MCP subprocesses.
+    # No provider token here: the collector holds it; this server only reads
+    # /var/lib/crypto-tracker/store and queues commands in .../spool.
+    env:
+      PYTHONPATH: "/opt/crypto-tracker/current/src"
+      TRACKER_HOME: "/var/lib/crypto-tracker"
+      PYTHONDONTWRITEBYTECODE: "1"
+    # untrusted: every tool without readOnlyHint (all write tools) needs approval.
+    trust: untrusted
+    timeout: 60
+    connect_timeout: 30
+    tools:
+      resources: false
+      prompts: false
+
+  # Optional: the official 6551 servers for ad-hoc raw search. Use a SEPARATE
+  # token from the collector's, stored in ~/.hermes/.env (chmod 600) or a Hermes
+  # secret source. Never add it to terminal.env_passthrough.
+  # opentwitter:
+  #   command: "/opt/6551/opentwitter-mcp/.venv/bin/opentwitter-mcp"
+  #   env:
+  #     OPENNEWS_TOKEN: "${env:OPENNEWS_TOKEN}"
+  #   trust: untrusted
+  #   tools:
+  #     include: [get_twitter_user, get_twitter_user_tweets, search_twitter,
+  #               search_twitter_advanced, get_twitter_tweet_by_id,
+  #               get_twitter_kol_followers]
+  #     # add_twitter_watch / delete_twitter_watch change the server-side watch
+  #     # list and are intentionally excluded.
+  #     resources: false
+  #     prompts: false
+  # opennews:
+  #   command: "/opt/6551/opennews-mcp/.venv/bin/opennews-mcp"
+  #   env:
+  #     OPENNEWS_TOKEN: "${env:OPENNEWS_TOKEN}"
+  #   trust: untrusted
+  #   tools:
+  #     include: [search_news, search_news_by_coin, search_news_advanced,
+  #               get_news_by_signal, get_high_score_news, get_latest_news]
+  #     resources: false
+  #     prompts: false
+
+# Recommended hardening for an agent that reads third-party text:
+# terminal:
+#   backend: docker        # LLM-generated commands run in a container, not on the host
+# security:
+#   redact_secrets: true
+
+# Cron jobs (create with the CLI after copying the skill and script):
+#
+#   cp -r hermes/skills/crypto-project-tracker ~/.hermes/skills/
+#   install -m 0700 hermes/scripts/tracker-alerts.py ~/.hermes/scripts/
+#
+#   # Alerts: script only, no LLM, silent when nothing is new.
+#   hermes cron create "every 5m" --no-agent --script tracker-alerts.py \
+#     --deliver telegram --name crypto-tracker-alerts --paused
+#
+#   # Daily brief: agent run with the skill loaded.
+#   hermes cron create "45 8 * * *" \
+#     "按 crypto-project-tracker skill 的「每日简报」流程生成今天的项目简报" \
+#     --skill crypto-project-tracker --deliver telegram \
+#     --name crypto-tracker-daily --paused
+#
+#   hermes cron run <job_id>      # verify once, then:
+#   hermes cron resume <job_id>

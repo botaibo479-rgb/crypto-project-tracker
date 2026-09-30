@@ -1,0 +1,62 @@
+[Unit]
+Description=crypto-project-tracker collector (holds the provider token; no listening ports)
+Documentation=file:///opt/crypto-tracker/current/docs/HERMES-SETUP.zh-CN.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crypto-tracker
+Group=tracker-readers
+Environment=TRACKER_HOME=/var/lib/crypto-tracker
+Environment=PYTHONPATH=/opt/crypto-tracker/current/src
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/crypto-tracker/current/.venv/bin/python -m crypto_tracker.collector
+Restart=on-failure
+RestartSec=30
+
+# Credentials: decrypted by systemd into $CREDENTIALS_DIRECTORY, readable only by
+# this service. Create with deploy/systemd/install.sh (systemd-creds encrypt).
+LoadCredentialEncrypted=opennews_token:/etc/credstore.encrypted/opennews_token
+# Optional DefiLlama Pro key for disclosed funding rounds:
+#LoadCredentialEncrypted=defillama_key:/etc/credstore.encrypted/defillama_key
+
+# Files: 0640, directories 0750; group tracker-readers (the Hermes user) can read.
+UMask=0027
+ReadWritePaths=/var/lib/crypto-tracker
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=512M
+TasksMax=64
+
+# Optional network defence in depth (the code already refuses private targets).
+# Keep your resolver reachable: e.g. systemd-resolved listens on 127.0.0.53.
+#IPAddressDeny=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+#IPAddressAllow=127.0.0.53
+
+[Install]
+WantedBy=multi-user.target

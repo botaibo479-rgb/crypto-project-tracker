@@ -1,8 +1,0 @@
-*
-!*.py
-!rootdata-team.json
-!dist/
-!dist/**
-test_*.py
-__pycache__/
-dist/app.js

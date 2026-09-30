@@ -319,6 +319,8 @@ class Collector:
         )
 
     def collect_logos(self):
+        if not self.request.has_token:
+            return
         for p in self.active():
             if not p.get("account"):
                 continue
@@ -387,7 +389,7 @@ class Collector:
 
     def collect_project(self, project):
         """Everything for one project; used after add and for on-demand refresh."""
-        if project.get("account"):
+        if project.get("account") and self.request.has_token:
             account = {"account": project["account"]}
             social.enrich_avatars([account], self.request)
             if account.get("avatar"):
