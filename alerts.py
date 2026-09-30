@@ -34,6 +34,7 @@ def evaluate(rule,runtime,market,news,now):
   runtime['lastFiredAt']=now
   fired.append({'id':uuid.uuid4().hex,'ruleId':rule['id'],'ruleName':rule['name'],'p':rule['p'],'type':rule['type'],'title':title,'at':now,'evidence':evidence,'ruleSnapshot':{k:rule.get(k) for k in ['type','period','threshold','cooldownMinutes','confirm','listingScope']}})
  kind=rule['type'];runtime['checkedAt']=now
+ if kind not in TYPES:runtime['status']='paused';return []
  if kind in PROVIDER_TYPES:
   runtime['status']='watching'
   for e in sorted(news,key=lambda x:x.get('publishedAt') or 0):

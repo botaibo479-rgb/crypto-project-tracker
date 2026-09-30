@@ -23,6 +23,8 @@ import intelligence
 import reader_quality
 import delivery
 import preferences
+import public_sources
+import project_calendar
 import rootdata_monitor
 import runtime_config as config
 from collection_state import social_result,merge_news
@@ -33,6 +35,8 @@ INTELLIGENCE=intelligence.Store(config.DATA_DIR/'intelligence.json')
 DELIVERY=delivery.Store(config.DATA_DIR/'delivery.json')
 ALERT_STORE=alerts.Store(config.DATA_DIR/'alerts.json')
 PREFERENCES=preferences.Store(config.DATA_DIR/'preferences.json')
+PUBLIC_SOURCES=public_sources.Store(config.DATA_DIR/'public-sources.json')
+PROJECT_CALENDAR=project_calendar.Store(config.DATA_DIR/'project-calendar.json')
 CHART_CACHE={}
 CHART_LOCK=threading.Lock()
 PROJECTS=[
@@ -74,9 +78,11 @@ if os.environ.get('SIGNAL_ENV_FILE'):
   if line.startswith('OPENNEWS_TOKEN='): TOKEN=line.split('=',1)[1].strip().strip('"\'')
   if '=' in line:
    key,value=line.split('=',1)
-   if key in {'SIGNAL_PUSH_ENABLED','SIGNAL_NTFY_URL','SIGNAL_NTFY_TOKEN'}:os.environ.setdefault(key,value.strip().strip('"\''))
+   if key in {'SIGNAL_PUSH_ENABLED','SIGNAL_NTFY_URL','SIGNAL_NTFY_TOKEN','SIGNAL_RSSHUB_URL','DEFILLAMA_API_KEY'}:os.environ.setdefault(key,value.strip().strip('"\''))
 
 def now():return int(time.time()*1000)
+PUBLIC_SOURCES.rsshub=os.environ.get('SIGNAL_RSSHUB_URL','')
+
 def request(url,payload=None):
  headers={'User-Agent':'SignalReader/0.2','Accept':'application/json, application/xml, text/html'}
  if url.startswith('https://ai.6551.io/'):
@@ -198,6 +204,8 @@ def provider_news(p):
  extra=[str(v).replace(chr(34),'').replace(chr(92),'') for v in p.get('aliases',[])[:4]+p.get('contracts',[])[:2]]
  query=QUERIES[p['id']]+''.join(' OR '+chr(34)+v+chr(34) for v in extra)
  tasks={'OpenNews':('news_search',{'coins':[p['symbol']],'limit':30,'page':1}),'OpenNews关键词':('news_search',{'q':query,'limit':30,'page':1}),'OpenTwitter':('twitter_user_tweets',{'username':p['account'],'maxResults':20,'includeReplies':True,'includeRetweets':False,'product':'Latest'})}
+ if PUBLIC_SOURCES.snapshot(p['id']).get('economy') and PUBLIC_SOURCES.healthy(p['id']):
+  tasks.pop('OpenNews关键词',None);statuses['OpenNews关键词']={'status':'limited','message':'免费源优先模式：健康 RSS 已更新，跳过关键词补充检索；保留币种、X 与市场事件'}
  for name,(path,payload) in tasks.items():
   try:
    response=json.loads(request('https://ai.6551.io/open/'+path,payload));rows=response.get('data',[])
@@ -228,7 +236,10 @@ def provider_news(p):
  return out,statuses
 
 def refresh_news(p):
+ free_events=PUBLIC_SOURCES.collect(p,news_event)
  events,statuses=provider_news(p)
+ events.extend(free_events)
+ statuses['免费订阅']={'status':'ok' if PUBLIC_SOURCES.healthy(p['id']) else 'limited','count':len(free_events),'message':'仅采集已确认订阅源；订阅管理可查看各源状态'}
  if TOKEN:
   team_events,team_status=team_news.collect(p,request,timestamp,news_event)
   events.extend(team_events);statuses['团队 X']=team_status
@@ -407,6 +418,25 @@ def social_loop():
    with LOCK:persist()
   except Exception as e:collector_status('social',running=False,lastError=error_label(e),lastErrorAt=now());time.sleep(60)
 
+def project_calendar_loop():
+ while True:
+  with LOCK:projects=[dict(p) for p in PROJECTS]
+  PROJECT_CALENDAR.collect(projects,os.environ.get('DEFILLAMA_API_KEY',''))
+  time.sleep(21600)
+
+def collect_free_project(p):
+ items=PUBLIC_SOURCES.collect(p,news_event)
+ with LOCK:
+  status=dict(DATA['sources'].get(p['id'],{}))
+ status['免费订阅']={'status':'ok' if PUBLIC_SOURCES.healthy(p['id']) else 'limited','count':len(items),'message':'已确认订阅源'}
+ store_news(p['id'],items,status)
+ with LOCK:persist()
+
+def source_snapshot(pid):
+ value=PUBLIC_SOURCES.snapshot(pid)
+ value['sources']=[{k:v for k,v in s.items() if k not in {'rows','conditional'}} for s in value['sources']]
+ return value
+
 def chart_data(pid,period):
  project=next((p for p in PROJECTS if p['id']==pid),None)
  if not project or period not in charts.PERIODS:raise ValueError('项目或周期无效')
@@ -416,13 +446,23 @@ def chart_data(pid,period):
   if cached and now()-cached['fetchedAt']<60000:return cached
   rows=api('/fapi/v1/klines',{'symbol':project['symbol']+'USDT','interval':period,'limit':1500})
   if not isinstance(rows,list):raise ValueError('K 线数据不可用')
-  result=charts.snapshot(rows,period,now(),ema);CHART_CACHE[key]=result;return result
+  result=charts.snapshot(rows,period,now(),ema)
+  try:
+   oi=api('/futures/data/openInterestHist',{'symbol':project['symbol']+'USDT','period':period,'limit':96})
+   result['oi']=charts.oi_snapshot(oi,now());result['oiStatus']='ok' if result['oi'] else 'empty'
+  except Exception:result['oi']=[];result['oiStatus']='unavailable'
+  CHART_CACHE[key]=result;return result
 
 class Handler(SimpleHTTPRequestHandler):
  def __init__(self,*args,**kwargs):super().__init__(*args,directory=str(ROOT/'dist'),**kwargs)
  def do_GET(self):
   if not config.allowed_read(self.headers.get('Host','')):
    self.send_error(403);return
+  if self.path.startswith('/api/extensions?'):
+   pid=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('project',[''])[0]
+   with LOCK:p=next((dict(p) for p in PROJECTS if p['id']==pid),None)
+   if not p:self.json_response({'error':'项目不存在'},404);return
+   self.json_response({'sources':source_snapshot(pid),'calendar':PROJECT_CALENDAR.snapshot(),'calendarSlug':p.get('calendarSlug') or p.get('coinId',''),'calendarProtocolId':p.get('calendarProtocolId','')});return
   if self.path=='/api/preferences':
    self.json_response({'values':PREFERENCES.snapshot()});return
   if self.path=='/api/digest':
@@ -442,9 +482,9 @@ class Handler(SimpleHTTPRequestHandler):
    except Exception:self.json_response({'error':'搜索服务暂不可用，可以手动填写项目信息'},502)
    return
   if self.path=='/api/live':
-   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in reader_quality.presentation(cluster(curate(DATA['events'],projects=PROJECTS)))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
+   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in reader_quality.presentation(cluster(curate(DATA['events'],projects=PROJECTS)))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'intelligence':intelligence_snapshot(),'projectCalendar':PROJECT_CALENDAR.snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
-  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js','/reader.js']:
+  if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js','/intelligence.js','/reader.js','/pro-chart.js','/workspace.js','/lightweight-charts.js','/lightweight-charts.LICENSE','/lightweight-charts.NOTICE']:
    self.send_error(404);return
   super().do_GET()
  def json_response(self,value,status=200):
@@ -457,6 +497,27 @@ class Handler(SimpleHTTPRequestHandler):
    length=int(self.headers.get('Content-Length','0'))
    if not 0<length<=(250000 if self.path=='/api/preferences' else 10000):raise ValueError('请求大小无效')
    payload=json.loads(self.rfile.read(length))
+   if self.path.startswith('/api/extensions/'):
+    with LOCK:p=next((dict(p) for p in PROJECTS if p['id']==payload.get('projectId')),None)
+    if not p:raise ValueError('项目不存在')
+    action=self.path.rsplit('/',1)[-1]
+    if action=='discover':threading.Thread(target=PUBLIC_SOURCES.discover,args=(p,),daemon=True).start()
+    elif action=='source':
+     PUBLIC_SOURCES.add(p['id'],str(payload.get('url','')),str(payload.get('label','')))
+     threading.Thread(target=collect_free_project,args=(p,),daemon=True).start()
+    elif action=='source-action':PUBLIC_SOURCES.action(p['id'],payload)
+    elif action=='calendar':PROJECT_CALENDAR.add(payload,p['id'])
+    elif action=='calendar-remove':PROJECT_CALENDAR.remove(payload.get('id'))
+    elif action=='mapping':
+     slug=str(payload.get('slug',''));ident=str(payload.get('protocolId',''))
+     if slug and not re.fullmatch('[a-z0-9-]{1,100}',slug):raise ValueError('CoinGecko 标识无效')
+     if ident and not re.fullmatch('[a-zA-Z0-9#_-]{1,100}',ident):raise ValueError('DefiLlama 协议 ID 无效')
+     with LOCK:
+      target=next(p for p in PROJECTS if p['id']==payload['projectId']);target.update(calendarSlug=slug,calendarProtocolId=ident);save_projects()
+     if os.environ.get('DEFILLAMA_API_KEY'):
+      threading.Thread(target=PROJECT_CALENDAR.collect,args=([dict(p) for p in PROJECTS],os.environ['DEFILLAMA_API_KEY']),daemon=True).start()
+    else:raise ValueError('未知操作')
+    self.json_response({'ok':True});return
    if self.path=='/api/preferences':
     result,status=PREFERENCES.update(payload);self.json_response(result,status);return
    if self.path=='/api/delivery/test':
@@ -478,6 +539,7 @@ class Handler(SimpleHTTPRequestHandler):
      if len(PROJECTS)>=20:raise ValueError('本地测试版最多支持 20 个项目')
      PROJECTS.append(project);QUERIES[project['id']]='"'+project['name']+'" OR "$'+project['symbol']+'"';save_projects()
     if project.get('teamSourceUrl'):threading.Thread(target=collect_rootdata,args=(dict(project),),daemon=True).start()
+    threading.Thread(target=PUBLIC_SOURCES.discover,args=(project,),daemon=True).start()
     threading.Thread(target=collect_new,args=(project,),daemon=True).start()
     threading.Thread(target=lambda: self.collect_social(project),daemon=True).start()
     self.json_response({'project':project});return
@@ -522,6 +584,7 @@ if __name__=='__main__':
  threading.Thread(target=alert_loop,daemon=True).start()
  threading.Thread(target=intelligence_loop,daemon=True).start()
  threading.Thread(target=delivery_loop,daemon=True).start()
+ threading.Thread(target=project_calendar_loop,daemon=True).start()
  threading.Thread(target=features.translation_loop,args=(DATA,LOCK,request),daemon=True).start()
  print('Signal live reader ready',flush=True)
  try:httpd.serve_forever()

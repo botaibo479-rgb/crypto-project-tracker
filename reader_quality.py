@@ -16,7 +16,7 @@ def quality(e):
   if e.get('isRetweet') or re.match(r'^RT\s+@',text,re.I):reason='纯转发'
   elif e.get('isReply') or text.startswith('@'):reason='回复 / 互动'
   elif len(chars)<18 and not re.search(r'mainnet.{0,15}(?:live|launched)|主网.{0,10}上线|暂停提现|暂停提款|漏洞已修复|ETF.{0,15}approved',text,re.I):reason='去除链接与互动符号后信息量较低'
- source_points={'official':30,'x':30,'team':24,'opennews':16,'kol':10}.get(channel,10)
+ source_points={'official':30,'x':30,'team':24,'opennews':16,'kol':10,'subscription':22}.get(channel,10)
  category={'ETF / 机构产品':25,'安全风险':40,'交易所动态':25,'代币机制':20,'项目合作':15,'产品进展':15}.get(e.get('topic'),0)
  concrete=bool(re.search(r'\d+(?:[.,]\d+)?\s*(?:%|million|billion|tokens?|USDT|USD|枚|万|亿|月|日)|\$\s*\d|\d{4}[-/]\d{1,2}|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d',text,re.I))
  action=bool(re.search(r'now live|has launched|has listed|will list|has completed|已上线|已完成|正式发布|已回购|已销毁|已下架',text,re.I))

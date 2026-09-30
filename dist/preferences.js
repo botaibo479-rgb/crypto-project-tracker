@@ -1,9 +1,9 @@
 /* Shared preferences for the single-owner service. Notification permission stays local. */
 {
- const fields=['hiddenProjects','pinnedProjects','projectGroups','projectOrder','unreadProjectsOnly','saved','read'];
+ const fields=['hiddenProjects','pinnedProjects','projectGroups','projectOrder','unreadProjectsOnly','saved','read','readerViews','readerFeedback'];
  const clone=x=>JSON.parse(JSON.stringify(x));
  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
- const snapshot=()=>Object.fromEntries(fields.map(k=>[k,clone(state[k])]));
+ const snapshot=()=>Object.fromEntries(fields.map(k=>[k,clone(state[k]??[])]));
  const localPersist=persist;
  let baseline={},desired=snapshot(),observed=snapshot(),ready=false,busy=false,dirty=false,message='正在同步阅读偏好…';
  function status(text){message=text;const node=document.querySelector('footer span');if(node)node.textContent=text}

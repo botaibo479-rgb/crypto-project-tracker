@@ -83,3 +83,9 @@ node --test test_*.cjs
 ## 阅读体验更新（本地待发布）
 
 首页优先要点、低信息量折叠、跨项目去重、主题分组、重要性评分，以及提醒模板、昨日摘要和可选 ntfy 推送已经加入。查看 [完整更新与配置说明](READER-UPDATES.zh-CN.md)。推送默认关闭，需用户自行配置接收端；当前摘要为原文要点，未启用 LLM 生成。
+
+## 图表与个人情报工作台更新
+
+专业 K 线、成交量/OI 副图、免费 RSS 订阅与可保存的个人筛选视图已加入。详细操作与数据边界见 [更新说明](WORKSPACE-UPDATES.zh-CN.md)。
+
+无需构建或安装 Python 第三方包；前端包含随项目打包的 Lightweight Charts 5.2.1 及其许可证。DefiLlama 融资 API 需自己的 API 权限和 `DEFILLAMA_API_KEY`；不配置时仍可录入带来源链接的融资历史。Telegram RSS 转换可选配置 `SIGNAL_RSSHUB_URL`。
