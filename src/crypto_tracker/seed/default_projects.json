@@ -1,0 +1,58 @@
+[
+ {
+  "id": "soon",
+  "name": "SOON",
+  "symbol": "SOON",
+  "account": "soon_svm",
+  "website": "https://soon.foundation/",
+  "bg": "#e2e9fa",
+  "color": "#586bb6",
+  "mark": "S"
+ },
+ {
+  "id": "near",
+  "name": "NEAR Protocol",
+  "symbol": "NEAR",
+  "account": "NEARProtocol",
+  "website": "https://www.near.org/",
+  "bg": "#e0efe8",
+  "color": "#3a7257",
+  "mark": "N",
+  "team": [
+   {
+    "account": "ilblackdragon",
+    "role": "联合创始人 · Illia Polosukhin",
+    "evidence": "https://docs.near.org/assets/files/Nightshade-201ea58f8dd6bc547f457d26ed5e8138.pdf",
+    "identity": "官方资料关联 · 非实时任职核验"
+   }
+  ]
+ },
+ {
+  "id": "pha",
+  "name": "Phala",
+  "symbol": "PHA",
+  "account": "PhalaNetwork",
+  "website": "https://phala.com/",
+  "bg": "#eef0df",
+  "color": "#6d7942",
+  "mark": "P",
+  "team": [
+   {
+    "account": "marvin_tong",
+    "role": "创始人 · Marvin Tong",
+    "evidence": "https://phala.com/reports/2025RealCodeForRealdAGI.pdf",
+    "identity": "官方资料关联 · 非实时任职核验"
+   }
+  ]
+ },
+ {
+  "id": "nil",
+  "name": "Nillion",
+  "symbol": "NIL",
+  "account": "nillion",
+  "website": "https://nillion.com/",
+  "bg": "#e7e5fa",
+  "color": "#7665ad",
+  "mark": "N"
+ }
+]
